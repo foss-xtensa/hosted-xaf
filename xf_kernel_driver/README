@@ -1,0 +1,12 @@
+Compile:
+
+make clean && make
+
+Insert:
+
+sudo insmod xtensa-hifi.ko
+
+
+Remove:
+
+sudo rmmod xtensa-hifi

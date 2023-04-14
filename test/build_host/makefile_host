@@ -1,0 +1,65 @@
+
+.PHONY: all install clean dspfw
+
+ROOTDIR = ..
+CODEC_NAME = af_hosted
+
+XA_RTOS ?= linux
+XAF ?= host
+XF_TRACE ?= 0
+XA_DISABLE_DEPRECATED_API ?= 0
+XA_DISABLE_EVENT ?= 0
+XA_PRIORITY ?= 0
+
+ifneq (,$(findstring RF-2015.2, $(XTENSA_SYSTEM)))
+# RF.2 toolchain
+  CFLAGS += -D__TOOLS_RF2__
+endif
+
+ifneq ($(XF_TRACE), 0)
+  CFLAGS += -DXF_TRACE=$(XF_TRACE)
+endif
+
+ifeq ($(XA_RTOS),linux)
+  INCLUDES += -I$(ROOTDIR)/include/sysdeps/linux/include
+  CFLAGS += -DHAVE_LINUX
+  CFLAGS += -DXAF_HOSTED_AP=1
+endif
+
+ifeq ($(XA_DISABLE_DEPRECATED_API), 1)
+   CFLAGS += -DXA_DISABLE_DEPRECATED_API
+endif
+
+ifeq ($(XA_DISABLE_EVENT), 1)
+   CFLAGS += -DXA_DISABLE_EVENT
+else
+   CFLAGS += -DXF_MSG_ERR_HANDLING=1
+endif
+
+ifeq ($(XA_PRIORITY), 1)
+   CFLAGS += -DXA_PRIORITY
+endif
+
+vpath %.c $(ROOTDIR)/algo/host-apf/src
+    
+HOSTOBJS += \
+    xf-proxy.o \
+    xf-trace.o \
+    xaf-api.o \
+    xf-fio.o
+
+LIBOSOBJS = 
+
+INCLUDES += \
+    -I$(ROOTDIR)/algo/host-apf/include \
+    -I$(ROOTDIR)/algo/xa_af_hostless/include \
+    -I$(ROOTDIR)/include \
+    -I$(ROOTDIR)/include/audio \
+    -I$(ROOTDIR)/algo/host-apf/include/sys/fio
+
+CFLAGS += -DXF_CFG_CORES_NUM=1
+
+FW: $(CODEC_NAME) 
+
+include common.mk
+

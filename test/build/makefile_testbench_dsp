@@ -1,0 +1,494 @@
+#
+# Copyright (c) 2015-2023 Cadence Design Systems, Inc.
+# 
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+
+
+################################################################################
+# Basic configuration (if not given in setup script)
+################################################################################
+XAF_HOSTED_DSP ?= 1
+XA_MSGQ ?= 1
+XF_TRACE ?= 0
+XA_DISABLE_EVENT ?= 0
+XA_DISABLE_CLASS_AUDIO_CODEC ?= 0
+XA_DISABLE_CLASS_MIXER ?= 0
+XA_DISABLE_CLASS_MIMO_PROC ?= 0
+XA_DISABLE_CLASS_CAPTURER ?= 0
+XA_DISABLE_CLASS_RENDERER ?= 0
+XAF_HOSTED_DSP_KEEP_ALIVE ?= 1
+
+XF_CFG_CORES_NUM ?= 1
+XF_CORE_ID ?= 0
+XTCORE ?= core$(XF_CORE_ID)
+XF_LOCAL_IPC_NON_COHERENT ?= 1
+
+ifeq ($(XF_CFG_CORES_NUM),1)
+	XF_LOCAL_IPC_NON_COHERENT = 0
+endif
+
+################################################################################
+# Environment setup
+################################################################################
+ROOTDIR = ..
+OBJDIR = objs$(S)test
+.PHONY: 	all clean comp_libs
+default:	all
+
+XA_RTOS ?= xos
+TFLM_SUPPORT ?= 0
+XTSC_RUN ?= 1
+
+### A list of component-enabler switches(enabled by default) ###
+XA_MP3_DECODER = 1
+XA_MP3_ENCODER = 1
+XA_MIXER = 1
+XA_PCM_GAIN = 1
+XA_AMR_WB_DEC = 1
+XA_SRC_PP_FX = 1
+XA_AAC_DECODER = 1
+XA_RENDERER = 1
+XA_CAPTURER = 1
+XA_VORBIS_DECODER = 1
+XA_AEC22 = 1
+XA_AEC23 = 1
+XA_PCM_SPLIT = 1
+XA_MIMO_MIX = 1
+XA_OPUS_ENCODER = 1
+XA_OPUS_DECODER = 1
+
+XA_TFLM_MICROSPEECH ?= 0
+XA_TFLM_PERSON_DETECT ?= 0
+ifeq ($(TFLM_SUPPORT),1)
+    XA_TFLM_MICROSPEECH = 1
+    XA_TFLM_PERSON_DETECT = 1
+else
+    ifeq ($(XA_TFLM_MICROSPEECH),1)
+       TFLM_SUPPORT= 1
+    endif
+    ifeq ($(XA_TFLM_PERSON_DETECT),1)
+        TFLM_SUPPORT= 1
+    endif
+endif
+
+UNAME_S := $(shell uname -s)
+
+ifneq ($(UNAME_S),Linux)
+CP = copy
+MV = move
+else
+CP = cp -f
+MV = mv
+endif
+
+# Common to both cores
+ifneq ($(XF_CFG_CORES_NUM),1)
+  SUBSYSTEM ?= $(ROOTDIR)/xtsc
+  CC = xt-clang --xtensa-core=$(XTCORE) --xtensa-system=$(XTENSA_SYSTEM)
+  CPLUSPLUS = xt-clang++ --xtensa-core=$(XTCORE) --xtensa-system=$(XTENSA_SYSTEM)
+  INCLUDES += -I$(ROOTDIR)/xf_shared/include -I$(ROOTDIR)/include/sysdeps/mc_ipc
+  INCLUDES += -I$(SUBSYSTEM)/sysbuilder/include
+  INCLUDES += -I$(SUBSYSTEM)/mbuild/package/xtensa-elf/include
+  LDFLAGS += -mlsp=$(SUBSYSTEM)/mbuild/package/cores/$(XTCORE)/xtensa-elf/lib/sim
+  SHMEM_LSP=$(SUBSYSTEM)/mbuild/package/cores/shared/xtensa-elf/lib/shared 
+  EXTRA_LIBS += -Wl,--just-symbols,$(LIB_SHARED)
+else
+  CC = xt-clang
+  CPLUSPLUS = xt-clang++
+#Hosted XAF
+ifeq ($(XAF_HOSTED_DSP),1)
+  SUBSYSTEM ?= $(ROOTDIR)/xtsc
+  CC = xt-clang --xtensa-core=$(XTCORE) --xtensa-system=$(XTENSA_SYSTEM)
+  CPLUSPLUS = xt-clang++ --xtensa-core=$(XTCORE) --xtensa-system=$(XTENSA_SYSTEM)
+  INCLUDES += -I$(ROOTDIR)/xf_shared/include -I$(ROOTDIR)/include/sysdeps/mc_ipc
+  INCLUDES += -I./sysbuilder/include
+  INCLUDES += -I$(SUBSYSTEM)/mbuild/package/xtensa-elf/include
+  LDFLAGS += -mlsp=$(SUBSYSTEM)/mbuild/package/cores/$(XTCORE)/xtensa-elf/lib/sim
+endif
+endif
+  OBJCOPY = xt-objcopy
+  ISS = xt-run $(XTCORE)
+  CONFIGDIR := $(shell $(ISS) --show-config=config)
+  include $(CONFIGDIR)/misc/hostenv.mk
+  CPU_PREFIX = xa
+
+  CFLAGS = -Wall -Werror -fsigned-char -mlongcalls -c -ffunction-sections
+
+  CFLAGS += -DISS_RUN
+  CFLAGS += -DXAF_PROFILE
+CFLAGS += -DHIFI_ONLY_XAF
+
+ifneq (,$(findstring RF-2015.2, $(XTENSA_SYSTEM)))
+# RF.2 toolchain
+  CFLAGS += -D__TOOLS_RF2__
+endif
+
+CFLAGS +=-DFIO_LOCAL_FS
+
+ifeq ($(XTSC_RUN), 1)
+  RUN = ./xaf_xtsc_run.sh NCORES $(XF_CFG_CORES_NUM) xt-run
+else
+  RUN = $(ISS)
+endif
+
+ifeq ($(DEBUG),1)
+  CFLAGS += -DXF_DEBUG=1
+  OPT_O2 = -O0 -g
+else
+  OPT_O2 = -O2
+endif
+
+ifeq ($(XA_RTOS),xos)
+  CFLAGS += -DHAVE_XOS
+  INCLUDES += -I$(ROOTDIR)/include/sysdeps/xos/include
+  LDFLAGS += -lxos
+endif
+
+ifeq ($(XA_RTOS),freertos)
+  FREERTOS_BASE ?= $(ROOTDIR)/FreeRTOS
+  CFLAGS += -DHAVE_FREERTOS
+  INCLUDES += -I$(ROOTDIR)/include/sysdeps/freertos/include \
+			  -I$(FREERTOS_BASE)/include \
+			  -I$(FREERTOS_BASE)/portable/XCC/Xtensa \
+			  -I$(FREERTOS_BASE)/demos/cadence/sim/common/config_files
+  LDFLAGS += -L$(FREERTOS_BASE)/demos/cadence/sim/build/$(XTENSA_CORE) \
+			 -lfreertos
+endif
+
+ifeq ($(TFLM_SUPPORT),1)
+ifeq ($(CORE),hifi5)
+  target = hifi5
+else
+  target = fusion_f1
+endif
+  TFLM_BASE ?= $(ROOTDIR)/tensorflow
+  vpath %.cpp $(ROOTDIR)/test/plugins/cadence/tflm_common
+  vpath %.c   $(ROOTDIR)/test/plugins/cadence/tflm_common
+  CPPFLAGS = -std=c++11 -DTF_LITE_STATIC_MEMORY
+  INCLUDES += -I$(TFLM_BASE) \
+              -I$(TFLM_BASE)/tensorflow/lite/micro/tools/make/downloads/flatbuffers/include
+  PLUGINOBJS_TFLM_COMMON_CPP = tflm-inference-api.o
+  PLUGINOBJS_TFLM_COMMON     = xa-tflm-inference-api.o
+  LDFLAGS += -std=c++11
+  LDFLAGS += $(TFLM_BASE)/tensorflow/lite/micro/tools/make/gen/xtensa_$(target)_default/lib/libtensorflow-microlite.a 
+endif
+  LDFLAGS += -Wl,--gc-sections
+
+ifneq ($(XF_TRACE), 0)
+  CFLAGS +=-DXF_TRACE=$(XF_TRACE)
+endif
+
+ifeq ($(XA_DISABLE_EVENT), 1)
+   CFLAGS += -DXA_DISABLE_EVENT
+endif
+
+ifeq ($(XA_DISABLE_CLASS_AUDIO_CODEC), 1)
+   CFLAGS += -DXA_DISABLE_CLASS_AUDIO_CODEC
+endif
+
+ifeq ($(XA_DISABLE_CLASS_MIXER), 1)
+   CFLAGS += -DXA_DISABLE_CLASS_MIXER
+endif
+
+ifeq ($(XA_DISABLE_CLASS_MIMO_PROC), 1)
+   CFLAGS += -DXA_DISABLE_CLASS_MIMO_PROC
+endif
+
+ifeq ($(XA_DISABLE_CLASS_CAPTURER), 1)
+   CFLAGS += -DXA_DISABLE_CLASS_CAPTURER
+endif
+
+ifeq ($(XA_DISABLE_CLASS_RENDERER), 1)
+   CFLAGS += -DXA_DISABLE_CLASS_RENDERER
+endif
+
+CFLAGS += -DXF_CORE_ID=$(XF_CORE_ID)
+CFLAGS += -DXF_LOCAL_IPC_NON_COHERENT=$(XF_LOCAL_IPC_NON_COHERENT)
+CFLAGS += -DXF_CFG_CORES_NUM=$(XF_CFG_CORES_NUM)
+CFLAGS += -DXAF_HOSTED_DSP=$(XAF_HOSTED_DSP)
+ifeq ($(XAF_HOSTED_DSP_KEEP_ALIVE),1)
+  CFLAGS += -DXAF_HOSTED_DSP_KEEP_ALIVE=1
+endif
+
+CFLAGS += $(EXTRA_CFLAGS)
+LDFLAGS += $(EXTRA_LDFLAGS)
+
+LIBDIR = $(ROOTDIR)$(S)lib/
+DSPLIB = $(LIBDIR)xa_af_hosted_$(XTCORE).a
+
+vpath %.c $(ROOTDIR)/test/src
+vpath %.c $(ROOTDIR)/test/plugins
+
+### Create a variable for each test-application's final binary/executable name ###
+BIN99 = xa_af_hosted_dsp_test_$(XTCORE)
+EXECBIN99 = xa_af_hosted_dsp_test
+BRDBIN99 = xa_af_hosted_dsp_test.bin
+
+### Create a variable mapping each test-application source file into the obj (.o) file ###
+MEMOBJS =  xaf-dsp-test.o xaf-mem-test.o xaf-clk-test.o xaf-utils-test.o xaf-fio-test.o
+#NOTE: do not change the order in this MEMOBJS list
+
+ifneq ($(XF_CFG_CORES_NUM),1)
+SHMEMOBJS = xf-shared.o
+endif
+
+### Create a variable which is a mapfile-name for each of the test-application in which the memory map of the binary/executable created is available. ###
+MAPFILE99  = map_$(BIN99).txt
+
+PLUGINOBJS_COMMON += xa-factory.o
+INCLUDES += \
+    -I$(ROOTDIR)/test/include \
+    -I$(ROOTDIR)/test/plugins \
+    -I$(ROOTDIR)/test/include/audio \
+    -I$(ROOTDIR)/include \
+    -I$(ROOTDIR)/include/audio
+
+all all-dec hosted_dsp: $(BIN99) 
+
+##########################################################################################
+ifeq ($(XA_TFLM_PERSON_DETECT), 1)
+PLUGINOBJS_TFLM_PERSON_DETECT += person_detect_model_data.o
+PLUGINOBJS_TFLM_PERSON_DETECT_CPP = person-detect-wrapper-api.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/tflm_person_detect
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/tflm_common
+CFLAGS += -DXA_TFLM_PERSON_DETECT=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/tflm_person_detect
+vpath %.cpp $(ROOTDIR)/test/plugins/cadence/tflm_person_detect
+endif
+
+ifeq ($(XA_TFLM_MICROSPEECH), 1)
+PLUGINOBJS_TFLM_MICROSPEECH += xa-microspeech-frontend.o microspeech_model_data.o
+PLUGINOBJS_TFLM_MICROSPEECH_CPP = microspeech-frontend-wrapper-api.o microspeech-inference-wrapper-api.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/tflm_microsspeech
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/tflm_common
+CFLAGS += -DXA_TFLM_MICROSPEECH=1
+LDFLAGS += $(TFLM_BASE)/tensorflow/lite/micro/tools/make/gen/xtensa_$(target)_default/lib/libmicro_speech_frontend.a	
+vpath %.c $(ROOTDIR)/test/plugins/cadence/tflm_microspeech
+vpath %.cpp $(ROOTDIR)/test/plugins/cadence/tflm_microspeech
+endif
+
+ifeq ($(XA_MP3_DECODER), 1)
+  PLUGINLIBS_MP3_DEC = $(ROOTDIR)/test/plugins/cadence/mp3_dec/lib/xa_mp3_dec.a
+PLUGINOBJS_MP3_DEC += xa-mp3-decoder.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/mp3_dec
+CFLAGS += -DXA_MP3_DECODER=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/mp3_dec
+endif
+
+ifeq ($(XA_MP3_ENCODER), 1)
+  PLUGINLIBS_MP3_ENC = $(ROOTDIR)/test/plugins/cadence/mp3_enc/lib/xa_mp3_enc.a
+PLUGINOBJS_MP3_ENC = xa-mp3-encoder.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/mp3_enc
+CFLAGS += -DXA_MP3_ENCODER=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/mp3_enc
+endif
+
+ifeq ($(XA_SRC_PP_FX), 1)
+  PLUGINLIBS_SRC_PP = $(ROOTDIR)/test/plugins/cadence/src-pp/lib/xa_src_pp.a
+PLUGINOBJS_SRC_PP += xa-src-pp.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/src-pp
+CFLAGS += -DXA_SRC_PP_FX=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/src-pp
+endif
+
+ifeq ($(XA_AAC_DECODER), 1)
+  PLUGINLIBS_AAC_DEC = $(ROOTDIR)/test/plugins/cadence/aac_dec/lib/xa_aac_dec.a
+PLUGINOBJS_AAC_DEC += xa-aac-decoder.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/aac_dec
+CFLAGS += -DXA_AAC_DECODER=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/aac_dec
+endif
+
+ifeq ($(XA_MIXER), 1)
+PLUGINOBJS_MIXER += xa-mixer.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/mixer
+CFLAGS += -DXA_MIXER=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/mixer
+endif
+ifeq ($(XA_PCM_GAIN), 1)
+PLUGINOBJS_PCM_GAIN += xa-pcm-gain.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/pcm_gain
+CFLAGS += -DXA_PCM_GAIN=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/pcm_gain
+endif
+
+ifeq ($(XA_AMR_WB_DEC), 1)
+  PLUGINLIBS_AMR_WB = $(ROOTDIR)/test/plugins/cadence/amr_wb/lib/xa_amr_wb_codec.a
+PLUGINOBJS_AMR_WB += xa-amr-wb-decoder.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/amr_wb
+CFLAGS += -DXA_AMR_WB_DEC=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/amr_wb
+endif
+
+ifeq ($(XA_RENDERER), 1)
+PLUGINOBJS_RENDERER += xa-renderer.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/renderer
+CFLAGS += -DXA_RENDERER=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/renderer
+endif
+
+ifeq ($(XA_CAPTURER), 1)
+PLUGINOBJS_CAPTURER += xa-capturer.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/capturer
+CFLAGS += -DXA_CAPTURER=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/capturer
+endif
+
+ifeq ($(XA_VORBIS_DECODER), 1)
+  PLUGINLIBS_VORBIS_DEC = $(ROOTDIR)/test/plugins/cadence/vorbis_dec/lib/xa_vorbis_dec.a
+PLUGINOBJS_VORBIS_DEC += xa-vorbis-decoder.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/vorbis_dec
+CFLAGS += -DXA_VORBIS_DECODER=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/vorbis_dec
+endif
+
+ifeq ($(XA_AEC22), 1)
+PLUGINOBJS_AEC22 += xa-aec22.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/aec22
+CFLAGS += -DXA_AEC22=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/aec22
+endif
+
+ifeq ($(XA_AEC23), 1)
+PLUGINOBJS_AEC23 += xa-aec23.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/aec23
+CFLAGS += -DXA_AEC23=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/aec23
+endif
+
+ifeq ($(XA_PCM_SPLIT), 1)
+PLUGINOBJS_PCM_SPLIT += xa-pcm-split.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/pcm_split
+CFLAGS += -DXA_PCM_SPLIT=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/pcm_split
+endif
+
+ifeq ($(XA_MIMO_MIX), 1)
+PLUGINOBJS_MIMO_MIX += xa-mimo-mix.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/mimo_mix
+CFLAGS += -DXA_MIMO_MIX=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/mimo_mix
+endif
+
+ifeq ($(XA_OPUS_ENCODER), 1)
+PLUGINLIBS_OPUS_ENC = $(ROOTDIR)/test/plugins/cadence/opus_enc/lib/xa_opus_codec.a
+PLUGINOBJS_OPUS_ENC = xa-opus-encoder.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/opus_enc
+CFLAGS += -DXA_OPUS_ENCODER=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/opus_enc
+endif
+
+ifeq ($(XA_OPUS_DECODER), 1)
+PLUGINLIBS_OPUS_DEC = $(ROOTDIR)/test/plugins/cadence/opus_enc/lib/xa_opus_codec.a
+PLUGINOBJS_OPUS_DEC = xa-opus-decoder.o
+PLUGINOBJS_OPUS_DEC += opus_header.o
+INCLUDES += -I$(ROOTDIR)/test/plugins/cadence/opus_dec
+CFLAGS += -DXA_OPUS_DECODER=1
+vpath %.c $(ROOTDIR)/test/plugins/cadence/opus_dec
+endif
+
+##########################################################################################
+### Add directory prefix to each of the test-application obj file ###
+#NA
+
+### Add directory prefix to plugin obj files of each test-application ###
+OBJ_PLUGINOBJS_COMMON = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_COMMON))
+OBJ_PLUGINOBJS_TFLM_MICROSPEECH = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_TFLM_MICROSPEECH))
+OBJ_PLUGINOBJS_TFLM_MICROSPEECH_CPP = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_TFLM_MICROSPEECH_CPP))
+OBJ_PLUGINOBJS_TFLM_PERSON_DETECT = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_TFLM_PERSON_DETECT))
+OBJ_PLUGINOBJS_TFLM_PERSON_DETECT_CPP = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_TFLM_PERSON_DETECT_CPP))
+OBJ_PLUGINOBJS_TFLM_COMMON_CPP = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_TFLM_COMMON_CPP))
+OBJ_PLUGINOBJS_TFLM_COMMON = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_TFLM_COMMON))
+OBJ_PLUGINOBJS_MP3_DEC = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_MP3_DEC))
+OBJ_PLUGINOBJS_MP3_ENC = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_MP3_ENC))
+OBJ_PLUGINOBJS_SRC_PP = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_SRC_PP))
+OBJ_PLUGINOBJS_AAC_DEC = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_AAC_DEC))
+OBJ_PLUGINOBJS_AMR_WB = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_AMR_WB))
+OBJ_PLUGINOBJS_MIXER = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_MIXER))
+OBJ_PLUGINOBJS_PCM_GAIN = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_PCM_GAIN))
+OBJ_PLUGINOBJS_RENDERER = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_RENDERER))
+OBJ_PLUGINOBJS_CAPTURER = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_CAPTURER))
+OBJ_PLUGINOBJS_VORBIS_DEC = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_VORBIS_DEC))
+OBJ_PLUGINOBJS_AEC22 = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_AEC22))
+OBJ_PLUGINOBJS_AEC23 = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_AEC23))
+OBJ_PLUGINOBJS_PCM_SPLIT = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_PCM_SPLIT))
+OBJ_PLUGINOBJS_MIMO_MIX = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_MIMO_MIX))
+OBJ_PLUGINOBJS_OPUS_ENC = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_OPUS_ENC))
+OBJ_PLUGINOBJS_OPUS_DEC = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_OPUS_DEC))
+OBJ_MEMOBJS = $(addprefix $(OBJDIR)/,$(MEMOBJS))
+ifneq ($(XF_CFG_CORES_NUM),1)
+OBJ_SHMEMOBJS = $(addprefix $(OBJDIR)/,$(SHMEMOBJS))
+endif
+
+### Create a variable containing the common list of obj files required to build a particular test-application binary. ###
+LIBS_LIST_COMMON = $(OBJ_MEMOBJS) $(OBJ_PLUGINOBJS_COMMON) $(DSPLIB) 
+
+### Create a variable containing the complete list of obj files required to build a particular test-application binary. ###
+#TFLMLIBS_MICROLITE = $(TFLM_BASE)/tensorflow/lite/micro/tools/make/gen/xtensa_$(target)_default/lib/libtensorflow-microlite.a 
+#TFLMLIBS_MICRO_SPEECH_FE = $(TFLM_BASE)/tensorflow/lite/micro/tools/make/gen/xtensa_$(target)_default/lib/libmicro_speech_frontend.a	
+#for Hosted DSP binary
+LIBS_LIST99 = $(LIBS_LIST_COMMON) $(OBJ_PLUGINOBJS_PCM_SPLIT) $(OBJ_PLUGINOBJS_MIXER) $(OBJ_PLUGINOBJS_PCM_GAIN) $(OBJ_PLUGINOBJS_AAC_DEC) $(OBJ_PLUGINOBJS_MP3_DEC) $(OBJ_PLUGINOBJS_SRC_PP)
+LIBS_LIST99 += $(OBJ_PLUGINOBJS_RECORDER_USECASE) $(OBJ_PLUGINOBJS_AEC22) $(OBJ_PLUGINOBJS_AEC23) $(OBJ_PLUGINOBJS_OPUS_ENC) $(OBJ_PLUGINOBJS_OPUS_DEC) $(OBJ_PLUGINOBJS_MIMO_MIX)
+LIBS_LIST99 += $(OBJ_PLUGINOBJS_CAPTURER) $(OBJ_PLUGINOBJS_RENDERER) $(OBJ_PLUGINOBJS_RECORDER_USECASE_MSG) $(OBJ_PLUGINOBJS_VORBIS_DEC) $(OBJ_PLUGINOBJS_AMR_WB) $(OBJ_PLUGINOBJS_MP3_ENC)
+
+ifeq ($(TFLM_SUPPORT),1)
+LIBS_LIST99 += $(OBJ_PLUGINOBJS_TFLM_COMMON_CPP) $(OBJ_PLUGINOBJS_TFLM_COMMON)
+LIBS_LIST99 += $(OBJ_PLUGINOBJS_TFLM_PERSON_DETECT) $(OBJ_PLUGINOBJS_TFLM_PERSON_DETECT_CPP) 
+LIBS_LIST99 += $(OBJ_PLUGINOBJS_TFLM_MICROSPEECH) $(OBJ_PLUGINOBJS_TFLM_MICROSPEECH_CPP)
+endif
+
+### Add the rule to link and create the final executable binary (bin file) of a test-application. ###
+ifeq ($(TFLM_SUPPORT),1)
+$(BIN99): clean_obj $(OBJDIR) $(LIBS_LIST99) comp_libs
+	$(CPLUSPLUS) -o $@ $(LIBS_LIST99) $(LDFLAGS) $(EXTRA_LIBS) -Wl,-Map=$(MAPFILE99)
+else
+$(BIN99): clean_obj $(OBJDIR) $(LIBS_LIST99) comp_libs
+	$(CC) -o $@ $(LIBS_LIST99) $(LDFLAGS) $(EXTRA_LIBS) -Wl,-Map=$(MAPFILE99)
+endif
+
+%.bin: %
+	$(OBJCOPY) -O binary $< $@
+$(OBJDIR):
+	-$(MKPATH) $(OBJDIR)
+
+### Add the rule to compile the soucre (.c) files into obj (.o) files ###
+$(OBJDIR)/%.o: %.c
+	@echo "Compiling $<"
+	$(QUIET) $(CC) -c $(OPT_O2) $(CFLAGS) $(INCLUDES) -o $@ $<
+
+$(OBJDIR)/%.o: %.cpp
+	@echo "Compiling $<"
+	$(QUIET) $(CC) -c $(CPPFLAGS) $(OPT_O2) $(CFLAGS) $(INCLUDES) -o $@ $<
+
+$(OBJS_APP0OBJS)/%.o: %.c
+	@echo "Compiling $<"
+	$(QUIET) $(CC) -c $(OPT_O2) $(CFLAGS) $(INCLUDES) -o $@ $<
+
+### Add the test-application binary under the target 'clean' ###
+clean_obj:
+	-$(RM) $(OBJDIR)$(S)* map_*.txt
+
+clean: clean_obj
+	-$(RM) $(BIN99)
+
+### Add to the variable containing the obj list, the complete list of library files (.a) required to build a particular test-application binary. ###
+comp_libs:
+	$(eval LIBS_LIST99+=$(PLUGINLIBS_MP3_DEC) $(PLUGINLIBS_AAC_DEC) $(PLUGINLIBS_SRC_PP) $(PLUGINLIBS_OPUS_ENC) $(PLUGINLIBS_OPUS_DEC) $(PLUGINLIBS_MP3_ENC) $(PLUGINLIBS_AMR_WB) $(PLUGINLIBS_VORBIS_DEC))

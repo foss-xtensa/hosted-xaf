@@ -1,0 +1,36 @@
+#
+# Kbuild for Xtensa Audio proxy
+#
+obj-m 		:= xtensa-hifi.o
+
+# ...enable debug interface by default
+XTENSA_DEBUG_TRACE ?= y
+
+# ...enable section mismatch debugging
+CONFIG_DEBUG_SECTION_MISMATH ?= y
+
+xtensa-hifi-y	:= ./src/xf-proxy.o  #./src/xf-shunt.o src/xf-proxy.o ./src/xf-shunt.o ./src/xf-rcar.o  ./src/xf-fw.o  
+ccflags-y += -I$(src)/include
+
+ifneq (,$(filter $(BOARD), lager koelsch))
+ccflags-y += -I$(src)/include/sys/xt-shmem
+xtensa-hifi-y += src/xf-fw.o src/xf-rcar.o
+endif
+
+ifeq ($(BOARD), shunt)
+ccflags-y += -I$(src)/include/sys/shunt
+xtensa-hifi-y += src/xf-shunt.o
+XTENSA_AUDIO_IPI_SHUNT := y
+endif
+
+ifeq ($(BOARD), xtfpga)
+ccflags-y += -I$(src)/include/sys/xt-ml605
+xtensa-hifi-y += src/xf-fw.o src/xf-ml605.o
+endif
+
+ifeq ($(CONFIG_DEBUG_FS), y)
+	ifneq ($(XTENSA_AUDIO_IPI_SHUNT), y)
+		ccflags-$(XTENSA_DEBUG_TRACE) += -DXTENSA_DEBUG_TRACE
+	endif
+endif
+ccflags-y += -save-temps=obj
