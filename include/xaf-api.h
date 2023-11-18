@@ -24,6 +24,7 @@
 #define __XA_API_H__
 
 #include "xa_type_def.h"
+#include "xaf-config-user.h"
 #include <string.h>
 
 /* Constants */
@@ -58,8 +59,6 @@
 #endif //XF_CFG_CORES_NUM
 
 #ifdef XAF_HOSTED_DSP
-#define XF_CFG_SHMEM_ADDRESS(core)          0xE0001000
-
 #define XF_CFG_REMOTE_IPC_POOL_SIZE         (256 << 10)
 #endif //XAF_HOSTED_DSP
 
@@ -118,13 +117,12 @@ typedef enum {
 
 typedef enum {
     XAF_MEM_ID_DEV = 0,
-#if (XAF_HOSTED_AP || XAF_HOSTED_DSP)
-    XAF_MEM_ID_DEV_FAST = XAF_MEM_ID_DEV, //duplicate/or same pool for now TODO
-    XAF_MEM_ID_DEV_MAX = XAF_MEM_ID_DEV, /* ...ID_DEV_MAX set to the last DEV mem type. To insert additional pools before MAX */
+#if (defined(XAF_HOSTED_AP) || defined(XAF_HOSTED_DSP)) && (XF_CFG_CORES_NUM == 1)
+    XAF_MEM_ID_DEV_FAST = XAF_MEM_ID_DEV,       /* ...only one type of mem-pool for hosted for now (TODO) */
 #else
     XAF_MEM_ID_DEV_FAST,
-    XAF_MEM_ID_DEV_MAX = XAF_MEM_ID_DEV_FAST, /* ...ID_DEV_MAX set to the last DEV mem type. To insert additional pools before MAX */
 #endif
+    XAF_MEM_ID_DEV_MAX = XAF_MEM_ID_DEV_FAST, /* ...ID_DEV_MAX set to the last DEV mem type. To insert additional pools before MAX */
     XAF_MEM_ID_COMP,
     XAF_MEM_ID_COMP_FAST,
     XAF_MEM_ID_COMP_MAX = XAF_MEM_ID_COMP_FAST, /* ...ID_COMP_MAX set to the last COMP mem type. To insert additional pools before MAX */
@@ -187,7 +185,7 @@ struct xaf_perf_stats_s{
     long long dsp_comps_cycles;
     int dsp_comp_buf_size_peak[XAF_MEM_ID_MAX];
     int dsp_shmem_buf_size_peak;
-    int dsp_framework_local_buf_size_peak;
+    int dsp_framework_local_buf_size;
     int dsp_frmwk_buf_size_peak[XAF_MEM_ID_MAX];
 } 
 #ifdef XAF_HOSTED_AP
@@ -264,7 +262,7 @@ typedef struct xaf_ext_buffer
     /* ...parameter data (4 bytes aligned) */
     UWORD8 *data;
 
-} __attribute__ ((__packed__, __aligned__(4))) xaf_ext_buffer_t;
+} __attribute__ ((__packed__, __aligned__(8))) xaf_ext_buffer_t;
 
 /* Function prototypes */
 XAF_ERR_CODE xaf_adev_config_default_init(xaf_adev_config_t *pconfig);
@@ -276,9 +274,9 @@ XAF_ERR_CODE xaf_comp_config_default_init(xaf_comp_config_t *pconfig);
 XAF_ERR_CODE xaf_comp_create(pVOID p_adev, pVOID *pp_comp, xaf_comp_config_t *pconfig);
 XAF_ERR_CODE xaf_comp_delete(pVOID p_comp);
 XAF_ERR_CODE xaf_comp_set_config(pVOID p_comp, WORD32 num_param, pWORD32 p_param);
-XAF_ERR_CODE xaf_comp_set_config_ext(pVOID comp_ptr, WORD32 num_param, WORD32 *p_param);
+XAF_ERR_CODE xaf_comp_set_config_ext(pVOID comp_ptr, WORD32 num_param, pVOID p_param);
 XAF_ERR_CODE xaf_comp_get_config(pVOID p_comp, WORD32 num_param, pWORD32 p_param);
-XAF_ERR_CODE xaf_comp_get_config_ext(pVOID comp_ptr, WORD32 num_param, WORD32 *p_param);
+XAF_ERR_CODE xaf_comp_get_config_ext(pVOID comp_ptr, WORD32 num_param, pVOID p_param);
 XAF_ERR_CODE xaf_comp_process(pVOID p_adev, pVOID p_comp, pVOID p_buf, UWORD32 length, xaf_comp_flag flag);
 XAF_ERR_CODE xaf_connect(pVOID p_src, WORD32 src_out_port, pVOID p_dest, WORD32 dest_in_port, WORD32 num_buf);
 XAF_ERR_CODE xaf_disconnect(pVOID p_src, WORD32 src_out_port, pVOID p_dest, WORD32 dest_in_port);
@@ -292,7 +290,6 @@ XAF_ERR_CODE xaf_resume(pVOID p_comp, WORD32 port);
 
 XAF_ERR_CODE xaf_probe_start(pVOID p_comp);
 XAF_ERR_CODE xaf_probe_stop(pVOID p_comp);
-extern void *dsp_thread_entry(void *arg);
 
 #ifndef XA_DISABLE_EVENT
 XAF_ERR_CODE xaf_create_event_channel(pVOID p_src, UWORD32 src_config_param, pVOID p_dest, UWORD32 dst_config_param, UWORD32 nbuf, UWORD32 buf_size);
@@ -303,4 +300,10 @@ XAF_ERR_CODE xaf_delete_event_channel(pVOID p_src, UWORD32 src_config_param, pVO
 XAF_ERR_CODE xaf_dsp_open(pVOID *pp_adev, xaf_adev_config_t *pconfig);
 XAF_ERR_CODE xaf_dsp_close(pVOID p_adev);
 #endif //XF_CFG_CORES_NUM
+
+#if defined(XAF_HOSTED_AP)
+XAF_ERR_CODE xaf_shmem_buffer_get(pVOID p_comp, UWORD32 size, pVOID *pshmem);
+XAF_ERR_CODE xaf_shmem_buffer_put(pVOID p_comp, pVOID *pshmem);
+#endif //defined(XAF_HOSTED_AP)
+
 #endif /* __XA_API_H__ */

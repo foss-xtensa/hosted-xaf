@@ -56,13 +56,5 @@ cmd="${RUN}\
         ${BIN} \
         ${test_args} \
         "
-
-#reinsert kernel module, workaround for avoiding any stale state in kernel-IPC due to any fatal errors during execution
-sudo rmmod xtensa_hifi
-sudo insmod ~/kernel_driver/xtensa-hifi.ko
-
 echo ${cmd}
 ${cmd}
-
-#allowing time for DSP to reboot after the test finishes
-sleep 60

@@ -94,60 +94,6 @@ static inline void __xf_unlock(xf_lock_t *lock)
 }
 
 /*******************************************************************************
- * Event support
- ******************************************************************************/
-
-typedef uint32_t xf_event_t;
-
-static inline void __xf_event_init(xf_event_t *event, uint32_t mask)
-{
-    event = event;
-    mask = mask;
-}
-
-static inline void __xf_event_destroy(xf_event_t *event)
-{
-    event = event;
-}
-
-static inline uint32_t __xf_event_get(xf_event_t *event)
-{
-    event = event;
-    return 0;
-}
-
-static inline void __xf_event_set(xf_event_t *event, uint32_t mask)
-{
-    event = event;
-    mask = mask;
-}
-
-static inline void __xf_event_set_isr(xf_event_t *event, uint32_t mask)
-{
-    event = event;
-    mask = mask;
-}
-
-static inline void __xf_event_clear(xf_event_t *event, uint32_t mask)
-{
-    event = event;
-    mask = mask;
-}
-
-static inline void __xf_event_wait_any(xf_event_t *event, uint32_t mask)
-{
-    event = event;
-    mask = mask;
-}
-
-static inline void __xf_event_wait_all(xf_event_t *event, uint32_t mask)
-{
-    event = event;
-    mask = mask;
-}
-
-
-/*******************************************************************************
  * Thread support
  ******************************************************************************/
 

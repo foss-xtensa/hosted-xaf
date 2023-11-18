@@ -34,12 +34,13 @@ XA_DISABLE_CLASS_MIXER ?= 0
 XA_DISABLE_CLASS_MIMO_PROC ?= 0
 XA_DISABLE_CLASS_CAPTURER ?= 0
 XA_DISABLE_CLASS_RENDERER ?= 0
-XAF_HOSTED_DSP_KEEP_ALIVE ?= 1
+XAF_HOSTED_DSP_KEEP_ALIVE ?= 0
 
 XF_CFG_CORES_NUM ?= 1
 XF_CORE_ID ?= 0
 XTCORE ?= core$(XF_CORE_ID)
 XF_LOCAL_IPC_NON_COHERENT ?= 1
+XA_ZERO_COPY?= 0
 
 ifeq ($(XF_CFG_CORES_NUM),1)
 	XF_LOCAL_IPC_NON_COHERENT = 0
@@ -174,7 +175,7 @@ ifeq ($(XA_RTOS),freertos)
 endif
 
 ifeq ($(TFLM_SUPPORT),1)
-ifeq ($(CORE),hifi5)
+ifneq (,$(findstring IsaUseHiFi5=1, $(shell grep 'IsaUseHiFi' "$(XTENSA_SYSTEM)/$(XTCORE)-params"|sed 's/\s\+//g')))
   target = hifi5
 else
   target = fusion_f1
@@ -236,11 +237,14 @@ DSPLIB = $(LIBDIR)xa_af_hosted_$(XTCORE).a
 
 vpath %.c $(ROOTDIR)/test/src
 vpath %.c $(ROOTDIR)/test/plugins
+ifneq ($(XF_CFG_CORES_NUM),1)
+vpath %.c $(ROOTDIR)/xf_shared/src
+endif
 
 ### Create a variable for each test-application's final binary/executable name ###
+#keeping same binary name for combintion of any plugin for ease of use
+BIN1 = xa_af_hosted_dsp_pcm_gain_test_$(XTCORE)
 BIN99 = xa_af_hosted_dsp_test_$(XTCORE)
-EXECBIN99 = xa_af_hosted_dsp_test
-BRDBIN99 = xa_af_hosted_dsp_test.bin
 
 ### Create a variable mapping each test-application source file into the obj (.o) file ###
 MEMOBJS =  xaf-dsp-test.o xaf-mem-test.o xaf-clk-test.o xaf-utils-test.o xaf-fio-test.o
@@ -251,6 +255,7 @@ SHMEMOBJS = xf-shared.o
 endif
 
 ### Create a variable which is a mapfile-name for each of the test-application in which the memory map of the binary/executable created is available. ###
+MAPFILE1  = map_$(BIN1).txt
 MAPFILE99  = map_$(BIN99).txt
 
 PLUGINOBJS_COMMON += xa-factory.o
@@ -262,6 +267,10 @@ INCLUDES += \
     -I$(ROOTDIR)/include/audio
 
 all all-dec hosted_dsp: $(BIN99) 
+
+af_hostless: CFLAGS += -DPCM_GAIN_PLUGIN
+af_hostless: $(BIN1)
+	$(MV) $(BIN1) $(BIN99)
 
 ##########################################################################################
 ifeq ($(XA_TFLM_PERSON_DETECT), 1)
@@ -436,15 +445,15 @@ OBJ_PLUGINOBJS_OPUS_DEC = $(addprefix $(OBJDIR)/,$(PLUGINOBJS_OPUS_DEC))
 OBJ_MEMOBJS = $(addprefix $(OBJDIR)/,$(MEMOBJS))
 ifneq ($(XF_CFG_CORES_NUM),1)
 OBJ_SHMEMOBJS = $(addprefix $(OBJDIR)/,$(SHMEMOBJS))
+LIB_SHARED = $(addprefix $(OBJDIR)/,$(firstword $(SHMEMOBJS)).data)
 endif
 
 ### Create a variable containing the common list of obj files required to build a particular test-application binary. ###
 LIBS_LIST_COMMON = $(OBJ_MEMOBJS) $(OBJ_PLUGINOBJS_COMMON) $(DSPLIB) 
 
 ### Create a variable containing the complete list of obj files required to build a particular test-application binary. ###
-#TFLMLIBS_MICROLITE = $(TFLM_BASE)/tensorflow/lite/micro/tools/make/gen/xtensa_$(target)_default/lib/libtensorflow-microlite.a 
-#TFLMLIBS_MICRO_SPEECH_FE = $(TFLM_BASE)/tensorflow/lite/micro/tools/make/gen/xtensa_$(target)_default/lib/libmicro_speech_frontend.a	
 #for Hosted DSP binary
+LIBS_LIST1 = $(LIBS_LIST_COMMON) $(OBJ_PLUGINOBJS_PCM_GAIN)
 LIBS_LIST99 = $(LIBS_LIST_COMMON) $(OBJ_PLUGINOBJS_PCM_SPLIT) $(OBJ_PLUGINOBJS_MIXER) $(OBJ_PLUGINOBJS_PCM_GAIN) $(OBJ_PLUGINOBJS_AAC_DEC) $(OBJ_PLUGINOBJS_MP3_DEC) $(OBJ_PLUGINOBJS_SRC_PP)
 LIBS_LIST99 += $(OBJ_PLUGINOBJS_RECORDER_USECASE) $(OBJ_PLUGINOBJS_AEC22) $(OBJ_PLUGINOBJS_AEC23) $(OBJ_PLUGINOBJS_OPUS_ENC) $(OBJ_PLUGINOBJS_OPUS_DEC) $(OBJ_PLUGINOBJS_MIMO_MIX)
 LIBS_LIST99 += $(OBJ_PLUGINOBJS_CAPTURER) $(OBJ_PLUGINOBJS_RENDERER) $(OBJ_PLUGINOBJS_RECORDER_USECASE_MSG) $(OBJ_PLUGINOBJS_VORBIS_DEC) $(OBJ_PLUGINOBJS_AMR_WB) $(OBJ_PLUGINOBJS_MP3_ENC)
@@ -456,11 +465,14 @@ LIBS_LIST99 += $(OBJ_PLUGINOBJS_TFLM_MICROSPEECH) $(OBJ_PLUGINOBJS_TFLM_MICROSPE
 endif
 
 ### Add the rule to link and create the final executable binary (bin file) of a test-application. ###
+$(BIN1): clean_obj $(OBJDIR) $(LIBS_LIST1) $(LIB_SHARED)
+	$(CC) -o $@ $(LIBS_LIST1) $(LDFLAGS) $(EXTRA_LIBS) -Wl,-Map=$(MAPFILE1)
+
 ifeq ($(TFLM_SUPPORT),1)
-$(BIN99): clean_obj $(OBJDIR) $(LIBS_LIST99) comp_libs
+$(BIN99): clean_obj $(OBJDIR) $(LIBS_LIST99) $(LIB_SHARED) comp_libs
 	$(CPLUSPLUS) -o $@ $(LIBS_LIST99) $(LDFLAGS) $(EXTRA_LIBS) -Wl,-Map=$(MAPFILE99)
 else
-$(BIN99): clean_obj $(OBJDIR) $(LIBS_LIST99) comp_libs
+$(BIN99): clean_obj $(OBJDIR) $(LIBS_LIST99) $(LIB_SHARED) comp_libs
 	$(CC) -o $@ $(LIBS_LIST99) $(LDFLAGS) $(EXTRA_LIBS) -Wl,-Map=$(MAPFILE99)
 endif
 
@@ -478,16 +490,18 @@ $(OBJDIR)/%.o: %.cpp
 	@echo "Compiling $<"
 	$(QUIET) $(CC) -c $(CPPFLAGS) $(OPT_O2) $(CFLAGS) $(INCLUDES) -o $@ $<
 
-$(OBJS_APP0OBJS)/%.o: %.c
+ifneq ($(XF_CFG_CORES_NUM),1)
+$(LIB_SHARED): $(OBJ_SHMEMOBJS)
 	@echo "Compiling $<"
-	$(QUIET) $(CC) -c $(OPT_O2) $(CFLAGS) $(INCLUDES) -o $@ $<
+	$(QUIET) $(CC) -o $@ $< -mlsp=$(SHMEM_LSP)
+endif
 
 ### Add the test-application binary under the target 'clean' ###
 clean_obj:
 	-$(RM) $(OBJDIR)$(S)* map_*.txt
 
 clean: clean_obj
-	-$(RM) $(BIN99)
+	-$(RM) $(BIN1) $(BIN99)
 
 ### Add to the variable containing the obj list, the complete list of library files (.a) required to build a particular test-application binary. ###
 comp_libs:

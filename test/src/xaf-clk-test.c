@@ -422,6 +422,7 @@ int cb_total_frmwrk_cycles(xaf_perf_stats_t *pstats)
     dsp_comps_cycles += wwd_cycles + hbuf_cycles;
     dsp_comps_cycles += inference_cycles + microspeech_fe_cycles;
     dsp_comps_cycles += pd_inference_cycles;
+    dsp_comps_cycles += kd_inference_cycles;
 
     pstats->dsp_comps_cycles = dsp_comps_cycles;
 #endif   /* #if defined(HAVE_XOS) */

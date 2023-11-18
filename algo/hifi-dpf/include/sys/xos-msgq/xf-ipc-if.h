@@ -35,6 +35,26 @@
 *******************************************************************************/
 #define XF_IPC_CACHE_ALIGNMENT XCHAL_DCACHE_LINESIZE
 
+#if (XF_LOCAL_IPC_NON_COHERENT)
+/* ...prevent instructions reordering */
+#define barrier()                           \
+    __asm__ __volatile__("": : : "memory")
+
+/* ...memory barrier */
+#define XF_IPC_BARRIER()                  \
+    __asm__ __volatile__("memw": : : "memory")
+
+#define XF_IPC_FLUSH(buf, length) \
+        ({ if ((length)) { barrier(); xthal_dcache_region_writeback((buf), (length)); XF_IPC_BARRIER(); } buf; })
+
+#define XF_IPC_INVALIDATE(buf, length) \
+        ({ if ((length)) { xthal_dcache_region_invalidate((buf), (length)); barrier(); } buf; })
+
+#else //XF_LOCAL_IPC_NON_COHERENT
+#define XF_IPC_FLUSH(buf, length)
+#define XF_IPC_INVALIDATE(buf, length)
+#endif //XF_LOCAL_IPC_NON_COHERENT
+
 /*******************************************************************************
                             ipc data-types
 *******************************************************************************/
@@ -80,8 +100,8 @@ typedef struct {
 
     /* ... variables required for shared memory stats */
     void *xf_dsp_shmem_buffer __attribute__ ((aligned(XF_IPC_CACHE_ALIGNMENT)));
-    int dsp_shmem_buf_size_curr __attribute__ ((aligned(XF_IPC_CACHE_ALIGNMENT)));
-    int dsp_shmem_buf_size_peak __attribute__ ((aligned(XF_IPC_CACHE_ALIGNMENT)));
+    unsigned int dsp_shmem_buf_size_curr __attribute__ ((aligned(XF_IPC_CACHE_ALIGNMENT)));
+    unsigned int dsp_shmem_buf_size_peak __attribute__ ((aligned(XF_IPC_CACHE_ALIGNMENT)));
 
     /* ...DSP cluster shared memory pool, accssed by all DSPs with platform lock */
     xf_shared_mm_pool_t   xf_dsp_shmem_pool __attribute__ ((aligned(XF_IPC_CACHE_ALIGNMENT)));
@@ -113,7 +133,7 @@ static inline void xf_ipi_dsp_close(UWORD32 core)
 extern int xf_ipc_open2(unsigned int core, xf_ipc_config_t *cfg);
 extern int xf_ipc_close2(unsigned int core);
 
-extern int xf_ipc_send2(unsigned int core /* dst */, void *pmsg, unsigned int msg_size, void *ppayload, unsigned int payload_size);
+extern int xf_ipc_send2(unsigned int this_core /* source */, unsigned int core /* dst */, void *pmsg, unsigned int msg_size, void *ppayload, unsigned int payload_size);
 extern int xf_ipc_recv2(unsigned int core, void **msg, unsigned int msg_size);
 
 extern int xf_ipc_wait2(unsigned int core);

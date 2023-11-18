@@ -52,7 +52,7 @@ extern clk_t dec_cycles;
 #endif
 
 /* ...XA_ZERO_COPY indicates that the buffer used for payload is allocated directly by the test-application. XAF library does not allocate any intenal buffer and transacts this buffer pointer between test-application and component. */
-#if defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
+#if (XA_ZERO_COPY) && (XF_LOCAL_IPC_NON_COHERENT)
 /* ...prevent instructions reordering */
 #define barrier()                           \
     __asm__ __volatile__("": : : "memory")
@@ -61,18 +61,47 @@ extern clk_t dec_cycles;
 #define XF_IPC_BARRIER()                  \
     __asm__ __volatile__("memw": : : "memory")
 
-#if (XF_CFG_CORES_NUM > 1)
 #define XF_IPC_FLUSH(buf, length) \
         ({ if ((length)) { barrier(); xthal_dcache_region_writeback((buf), (length)); XF_IPC_BARRIER(); } buf; })
 
 #define XF_IPC_INVALIDATE(buf, length) \
         ({ if ((length)) { xthal_dcache_region_invalidate((buf), (length)); barrier(); } buf; })
-#else
-#define XF_IPC_FLUSH(buf, length)   (void)0
-#define XF_IPC_INVALIDATE(buf, length)  (void)0
-#endif  //XF_CFG_CORES_NUM > 1
-#endif  //XA_ZERO_COPY
+#else //(XA_ZERO_COPY) && (XF_LOCAL_IPC_NON_COHERENT)
+#define XF_IPC_FLUSH(buf, length)
+#define XF_IPC_INVALIDATE(buf, length)
+#endif //(XA_ZERO_COPY) && (XF_LOCAL_IPC_NON_COHERENT)
 
+#define XF_PROXY_DATA_PAYLOAD_OFFSET    0x00004000
+#define MEM_START_DATA                  (XF_CFG_SHMEM_ADDRESS - 0x1000 + XF_PROXY_DATA_PAYLOAD_OFFSET)
+#define XF_PROXY_NULL                   (~0U)
+
+#if XA_ZERO_COPY
+/* ...translate shared proxy address to local pointer */
+static inline void * xf_ipc_a2b(UWORD32 core, UWORD32 address)
+{
+#ifdef XAF_HOSTED_DSP
+    void *start = (void *)MEM_START_DATA;
+    void *pval;
+    
+    if (address < XF_CFG_REMOTE_IPC_POOL_SIZE)
+    {
+        pval = start + address;
+    }
+    else if (address == XF_PROXY_NULL)
+    {
+        pval = (void *)NULL;
+    }
+    else
+    {
+        pval = (void *)-1;
+    }
+
+    return pval;
+#else //defined(XAF_HOSTED_DSP)
+    return (void *) address;
+#endif //defined(XAF_HOSTED_DSP)
+}
+#endif //XA_ZERO_COPY
 
 #ifndef PACK_WS_DUMMY
 typedef struct XA_OPUS_Decoder
@@ -524,13 +553,15 @@ static XA_ERRORCODE xa_opus_decoder_set_config_param(XA_OPUS_Decoder *d, WORD32 
     case XA_OPUS_DEC_CONFIG_PARAM_STREAM_MAP:
     {
         xaf_ext_buffer_t *ext_buf = (xaf_ext_buffer_t *) pv_value;
-#if defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
-#if XF_LOCAL_IPC_NON_COHERENT
+        pVOID pext_data;
         XF_IPC_INVALIDATE(ext_buf, sizeof(xaf_ext_buffer_t));
-        XF_IPC_INVALIDATE(ext_buf->data, ext_buf->valid_data_size);
-#endif
-#endif
-        memcpy(d->dec_control.stream_map, ext_buf->data, ext_buf->valid_data_size);
+#if (XA_ZERO_COPY)
+        pext_data = xf_ipc_a2b((UWORD32)XT_RSR_PRID(), (UWORD32)(ext_buf->data));
+#else //XA_ZERO_COPY
+        pext_data = ext_buf->data;
+#endif //XA_ZERO_COPY
+        XF_IPC_INVALIDATE(pext_data, ext_buf->valid_data_size);
+        memcpy(d->dec_control.stream_map, pext_data, ext_buf->valid_data_size);
         break;
     }
 
@@ -576,19 +607,17 @@ static XA_ERRORCODE xa_opus_decoder_get_config_param(XA_OPUS_Decoder *d, WORD32 
     case XA_OPUS_DEC_CONFIG_PARAM_STREAM_MAP:
     {
         xaf_ext_buffer_t *ext_buf = (xaf_ext_buffer_t *) pv_value;
-#if defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
-#if XF_LOCAL_IPC_NON_COHERENT
+        pVOID pext_data;
         XF_IPC_INVALIDATE(ext_buf, sizeof(xaf_ext_buffer_t));
-#endif
-#endif
-        memcpy(ext_buf->data, d->dec_control.stream_map, sizeof(d->dec_control.stream_map));
+#if (XA_ZERO_COPY)
+        pext_data = xf_ipc_a2b((UWORD32)XT_RSR_PRID(), (UWORD32)(ext_buf->data));
+#else //XA_ZERO_COPY
+        pext_data = ext_buf->data;
+#endif //XA_ZERO_COPY
+        memcpy(pext_data, d->dec_control.stream_map, sizeof(d->dec_control.stream_map));
         ext_buf->valid_data_size = sizeof(d->dec_control.stream_map);
-#if defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
-#if XF_LOCAL_IPC_NON_COHERENT
-        XF_IPC_FLUSH(ext_buf->data, ext_buf->valid_data_size);
+        XF_IPC_FLUSH(pext_data, ext_buf->valid_data_size);
         XF_IPC_FLUSH(ext_buf, sizeof(xaf_ext_buffer_t));
-#endif
-#endif
         break;
     }
 

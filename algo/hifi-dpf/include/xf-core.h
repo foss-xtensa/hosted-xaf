@@ -201,6 +201,13 @@ typedef struct __xf_shared_mm_pool
  ******************************************************************************/
 
 typedef struct {
+
+#if (XF_CFG_CORES_NUM > 1) || XAF_HOSTED_DSP
+    /* ...NOTE: not to move msgq_event, pmsgq_event variables anywhere else in the structure. Should be at the top. */
+    xf_event_t msgq_event;
+    xf_event_t *pmsgq_event;
+#endif
+
     /* ...per-core execution data */
     //xf_core_data_t          xf_core_data[XF_CFG_CORES_NUM];
     xf_core_data_t          xf_core_data[1];
@@ -239,13 +246,9 @@ typedef struct {
     WORD32 (*pdsp_comp_buf_size_curr)[XAF_MEM_ID_MAX];    /* ...current usage from audio_comp_buf_size in bytes                 */
     WORD32 (*pdsp_frmwk_buf_size_peak)[XAF_MEM_ID_MAX];   /* ...cumulative buffer size used in bytes from audio_frmwk_buf_size  */
     WORD32 (*pdsp_frmwk_buf_size_curr)[XAF_MEM_ID_MAX];   /* ...current usage from audio_frmwk_buf_size in bytes                */
+    WORD32 ap_frmwk_local_memory;                         /* ...app interface layer frmwork usage in bytes                      */
     xaf_perf_stats_t *pdsp_cb_stats;                      /* ...for cumulative execution cycles of all worker threads of a core */
     int (*cb_compute_cycles)(xaf_perf_stats_t*);          /* ...call-back function used by DSP to update MCPS stats before DSP thread is deleted */
-
-#if (XF_CFG_CORES_NUM > 1) || XAF_HOSTED_DSP
-    xf_event_t msgq_event;
-    xf_event_t *pmsgq_event;
-#endif
 
     UWORD32 worker_thread_stack_size[XAF_MAX_WORKER_THREADS]; /* ...user configurable worker stack size */
 

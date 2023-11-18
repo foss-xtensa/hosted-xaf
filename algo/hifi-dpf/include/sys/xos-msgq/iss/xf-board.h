@@ -36,13 +36,6 @@
 /*******************************************************************************
  * Global constants definitions
  ******************************************************************************/
-
-/* ...proxy shared memory address */
-#ifndef XF_CFG_SHMEM_ADDRESS
-//#define XF_CFG_SHMEM_ADDRESS(core)      0xe0001000
-#define XF_CFG_SHMEM_ADDRESS(core)      0xe0001000
-#endif
-
 /* ...inter-processor interrupt number (8(HiFi) or 2) */
 #define XF_PROXY_IPI_NUM(core)          XCHAL_EXTINT8_NUM
 

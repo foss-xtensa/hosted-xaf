@@ -277,7 +277,7 @@ INCLUDES += \
 
 mimo: $(BIN18) $(BIN20) $(BIN30)
 
-all: pcm-gain 
+all af_hostless: pcm-gain 
 
 ifeq ($(TFLM_SUPPORT),1)
 tflm_microspeech: 	CFLAGS += -DXA_TFLM_MICROSPEECH=$(XA_TFLM_MICROSPEECH)

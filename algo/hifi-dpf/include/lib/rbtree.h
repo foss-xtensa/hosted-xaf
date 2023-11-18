@@ -153,15 +153,4 @@ extern rb_idx_t rb_next(rb_tree_t *tree, rb_idx_t n_idx);
 /* ...backward tree iterator */
 extern rb_idx_t rb_prev(rb_tree_t *tree, rb_idx_t n_idx);
 
-#if XF_LOCAL_IPC_NON_COHERENT
-/* ...insert node into tree as a child of p */
-extern void     rb_insert_shmem(rb_tree_t *tree, rb_idx_t n_idx, rb_idx_t p_idx);
-
-/* ...replace the node with same-key value and fixup tree pointers */
-extern void     rb_replace_shmem(rb_tree_t *tree, rb_idx_t n_idx, rb_idx_t t_idx);
-
-/* ...delete node from the tree and return its in-order predecessor/successor */
-extern rb_idx_t rb_delete_shmem(rb_tree_t *tree, rb_idx_t n_idx);
-#endif //XF_LOCAL_IPC_NON_COHERENT
-
 #endif  /* __RBTREE_H */

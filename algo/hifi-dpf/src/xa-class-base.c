@@ -437,13 +437,17 @@ XA_ERRORCODE xa_base_set_param_ext(XACodecBase *base, xf_message_t *m)
         UWORD32     id = cmd->desc.id;
         UWORD32     dsize= cmd->desc.length;
         void *pext_data = xf_ipc_a2b(core, *(UWORD32 *)(cmd->data));
+#if !defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
     	xaf_ext_buffer_t *xf_ext_buf = (xaf_ext_buffer_t*)pext_data;
+#endif //!defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
 
         /* ...cut-off descriptor header */
         remaining -= sizeof(*cmd);
 
         /* ...ext buffer contains the data, convert to buffer before accessed by component */
+#if !defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
         xf_ext_buf->data = (UWORD8 *)xf_ipc_a2b(core, (UWORD32)xf_ext_buf->data);
+#endif //!defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
 
         TRACE(SETUP, _b("remaining:%u, desc_size:%u"), (UWORD32)remaining, (UWORD32)dsize);
 
@@ -521,7 +525,9 @@ XA_ERRORCODE xa_base_get_param_ext(XACodecBase *base, xf_message_t *m)
         UWORD32     id = cmd->desc.id;
         UWORD32     dsize = cmd->desc.length;
         void        *pext_data = xf_ipc_a2b(core, *(UWORD32 *)(cmd->data));
+#if !defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
     	xaf_ext_buffer_t *xf_ext_buf = (xaf_ext_buffer_t*)pext_data;
+#endif //!defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
 
         /* ...cut-off command header */
         remaining -= sizeof(*cmd);
@@ -529,8 +535,10 @@ XA_ERRORCODE xa_base_get_param_ext(XACodecBase *base, xf_message_t *m)
         /* ...make sure data buffer has sufficient length */
         XF_CHK_ERR(remaining >= dsize, XA_API_FATAL_INVALID_CMD_TYPE);
 
+#if !defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
         /* ...ext buffer contains the data, convert to buffer before accessed by component */
         xf_ext_buf->data = (UWORD8 *)xf_ipc_a2b(core, (UWORD32 )xf_ext_buf->data);
+#endif //!defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
 
         if (base->getparam)
         {
@@ -548,7 +556,9 @@ XA_ERRORCODE xa_base_get_param_ext(XACodecBase *base, xf_message_t *m)
             m->error = error;
 
         /* ...ext buffer contains the data, convert to buffer back after its updated by the component */
+#if !defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
         xf_ext_buf->data = (UWORD8 *)xf_ipc_b2a(core, (pVOID)xf_ext_buf->data);
+#endif //!defined(XAF_HOSTED_DSP) || !(XA_ZERO_COPY)
 
         /* ...pad remaininig bytes with zeroes */
  //       (pad ? memset(cmd->data + len, 0, 4 - pad) : 0);

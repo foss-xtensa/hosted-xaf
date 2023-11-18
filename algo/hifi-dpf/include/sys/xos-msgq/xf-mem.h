@@ -169,6 +169,8 @@ static inline int xf_shmem_alloc(UWORD32 core, xf_message_t *m)
         length = m->length;
     }
 
+    XF_CHK_ERR((mem_pool_type <= XAF_MEM_ID_DEV_MAX), XAF_MEMORY_ERR);
+
     pool = &XF_CORE_DATA(core)->shared_pool[mem_pool_type];
 
     /* ...length is always cache-line aligned */

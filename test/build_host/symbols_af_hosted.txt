@@ -33,3 +33,5 @@ __xf_timer_stop
 __xf_timer_start
 xaf_dsp_open
 xaf_dsp_close
+xaf_shmem_buffer_get
+xaf_shmem_buffer_put

@@ -20,25 +20,11 @@
 * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
+#ifndef __XA_CFG_USER_H__
+#define __XA_CFG_USER_H__
 
-#ifndef __DEFINITIONS_H__
-#define __DEFINITIONS_H__
+#define XF_CFG_SHMEM_BASE_ADDRESS       0xE0000000
 
-/* Identification Strings */
-#define LIBNAME "Audio Framework"
+#define XF_CFG_SHMEM_ADDRESS            (XF_CFG_SHMEM_BASE_ADDRESS + 0x00001000)
 
-/* LIB/API version information is directly modified by the packing script, do not change */
-#define LIBVERSION "1.0"
-#define LIB_APIVERSION_MAJOR 3
-#define LIB_APIVERSION_MINOR 3
-
-#if LIB_APIVERSION_MAJOR != XA_APIVERSION_MAJOR || \
-LIB_APIVERSION_MINOR != XA_APIVERSION_MINOR
-#error "Version Mismatch"
-#endif
-
-#define LIB_APIVERSION              XA_MAKE_VERSION_STR(\
-                                    LIB_APIVERSION_MAJOR, \
-                                    LIB_APIVERSION_MINOR)
-
-#endif /* __DEFINITIONS_H__ */
+#endif /* __XA_CFG_USER_H__ */

@@ -86,16 +86,18 @@
 #include "xaf-clk-test.h"
 #endif
 
-#if (XF_CFG_CORES_NUM > 1)
+#if (XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
 #include "xf-shared.h"
-#else
+#else //(XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
+
 #ifndef XF_SHMEM_SIZE
 #define XF_SHMEM_SIZE  0
 #endif
+
 extern void *shared_mem;
-//extern char perf_stats[];
-extern xaf_perf_stats_t perf_stats;
-#endif
+extern char perf_stats[];
+
+#endif //(XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
 
 #ifndef STACK_SIZE
 #ifdef XAF_HOSTED_AP
@@ -342,7 +344,7 @@ int xa_app_receive_events_cb(void *comp, UWORD32 event_id, void *buf, UWORD32 bu
 void xa_app_process_events(void);
 void xa_app_free_event_list(void);
 
-#if (XF_CFG_CORES_NUM == 1)
+#if (XF_CFG_CORES_NUM == 1) || defined(XAF_HOSTED_AP)
 
 #define TST_CHK_API_ADEV_OPEN(_p_adev, _adev_config, error_string) {\
         int k;\
@@ -413,6 +415,7 @@ void xa_app_free_event_list(void);
 		comp_config.num_output_buffers = _num_output_buf;\
 		comp_config.pp_inbuf = (pVOID (*)[XAF_MAX_INBUFS])_pp_inbuf;\
         TST_CHK_API(xaf_comp_create(p_adev, pp_comp, &comp_config), error_string);\
+        fprintf(stderr,"create comp:%s comp_type:%d on core:%d\n", _comp_id, _comp_type, _core);\
     }
 
 /* ...same macro as above, with comp_default_init done before calling the macro. Helps to set a parameter in a testbench before calling this common macro */
@@ -426,6 +429,7 @@ void xa_app_free_event_list(void);
 		comp_config.num_output_buffers = _num_output_buf;\
 		comp_config.pp_inbuf = (pVOID (*)[XAF_MAX_INBUFS])_pp_inbuf;\
         TST_CHK_API(xaf_comp_create(p_adev, pp_comp, &comp_config), error_string);\
+        fprintf(stderr,"USER_CFG_CHANGE create comp:%s comp_type:%d on core:%d\n", _comp_id, _comp_type, _core);\
     }
 
 #else
@@ -440,6 +444,7 @@ void xa_app_free_event_list(void);
 		comp_config.num_output_buffers = _num_output_buf;\
 		comp_config.pp_inbuf = (pVOID (*)[XAF_MAX_INBUFS])_pp_inbuf;\
         TST_CHK_API(xaf_comp_create(p_adev, pp_comp, &comp_config), error_string);\
+        fprintf(stderr,"create comp:%s comp_type:%d on core:%d\n", _comp_id, _comp_type, _core);\
     }
 
 /* ...same macro as above, with comp_default_init done before calling the macro. Helps to set a parameter in a testbench before calling this common macro */
@@ -453,9 +458,11 @@ void xa_app_free_event_list(void);
 		comp_config.num_output_buffers = _num_output_buf;\
 		comp_config.pp_inbuf = (pVOID (*)[XAF_MAX_INBUFS])_pp_inbuf;\
         TST_CHK_API(xaf_comp_create(p_adev, pp_comp, &comp_config), error_string);\
+        fprintf(stderr,"USER_CFG_CHANGE create comp:%s comp_type:%d on core:%d\n", _comp_id, _comp_type, _core);\
     }
 #endif
 
+#if XF_LOCAL_IPC_NON_COHERENT
 /* ...prevent instructions reordering */
 #define barrier()                           \
     __asm__ __volatile__("": : : "memory")
@@ -470,6 +477,11 @@ void xa_app_free_event_list(void);
 #define XF_IPC_INVALIDATE(buf, length) \
         ({ if ((length)) { xthal_dcache_region_invalidate((buf), (length)); barrier(); } buf; })
 
+#else //XF_LOCAL_IPC_NON_COHERENT
+#define XF_IPC_FLUSH(buf, length)
+#define XF_IPC_INVALIDATE(buf, length)
+#endif //XF_LOCAL_IPC_NON_COHERENT
+
 #ifdef HAVE_LINUX
 #ifdef __x86_64__
 typedef UWORD64                     uVOID;
@@ -479,5 +491,44 @@ typedef UWORD32                     uVOID;
 #else
 typedef UWORD32 uVOID;
 #endif
+
+#define TEST_ARG_PARSE_CORE_CFG {\
+            char *string;\
+            int core_id, comp_id;\
+            int jj = 10;\
+            extern int g_core_comp_cfg[NUM_COMP_IN_GRAPH];\
+            string = (char *)&(argv[i + 1][jj]);\
+            core_id = atoi(string);\
+            if ((core_id < 0) || (core_id >= XF_CFG_CORES_NUM))\
+            {\
+                fprintf(stderr, "\n\nCore-Config-Parse: Invalid Core ID. Allowed range: 0-%d\n", XF_CFG_CORES_NUM-1);\
+                return -1;\
+            }\
+            while (1)\
+            {\
+                if ((string == NULL) || (NULL == strstr(string, ",")))\
+                {\
+                    break;\
+                }\
+                jj += 2;\
+                string = (char *)&(argv[i + 1][jj]);\
+                comp_id = atoi(string);\
+                if ((comp_id < 0) || (comp_id > (NUM_COMP_IN_GRAPH-1)))\
+                {\
+                    fprintf(stderr, "Invalid Component ID %d. Allowed range: 0-%d\n", comp_id, NUM_COMP_IN_GRAPH-1);\
+                    return -1;\
+                }\
+                g_core_comp_cfg[comp_id] = core_id;\
+            }\
+            /*for(core_id=0; core_id < XF_CFG_CORES_NUM; core_id++){\
+                fprintf(stderr,"to create comps[");\
+                for(comp_id=0; comp_id < NUM_COMP_IN_GRAPH; comp_id++){\
+                    if(g_core_comp_cfg[comp_id] == core_id){\
+                        fprintf(stderr,"%d, ", comp_id);\
+                    }\
+                }\
+                fprintf(stderr,"] on core [%d of %d]\n", core_id, XF_CFG_CORES_NUM);\
+            }*/\
+        }
 
 #endif /* __XAF_UTILS_TEST_H__ */

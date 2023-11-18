@@ -8,11 +8,14 @@ import shutil
 import sys
 import shlex, subprocess
 import time
+import re
 
-QEMU_BASE_DIR="/servers/scratch50g/nddivya/projects/dev/hf2/tie/framework/hosted/linux_images/32bit"
+NCORES=1
+QEMU_BASE_DIR="/framework/hosted/qemu-linux-images/32bit"
 SSH_FORWARD_PORT = 10022
 SUBSYS_DIR="."
-LOG_FILE="c0_run_log.txt"
+DELAY=1
+
 SHMEM_ADDR=0xE0000000
 
 QEMU_BINARY_PATH    = QEMU_BASE_DIR+"/qemu-system-x86_64"
@@ -32,18 +35,28 @@ def xtsc_cmd(xtensa_core, xtensa_system, binary, pid, xtsc_ca):
     xtsc_turbo = "false"
   else:
     xtsc_turbo = "true"
+
   cmd = "xtsc-run " \
       + " --xtensa-system=" + xtensa_system \
-      + " --set_xtsc_parm=turbo=" + xtsc_turbo \
-      + " --define=core0_BINARY=" + binary  \
-      + " --define=core0_RUN_LOG=" + LOG_FILE \
+      + " --set_xtsc_parm=turbo=" + xtsc_turbo
+
+  LOG_FILE=[]
+  for i in range(0, NCORES):
+    LOG_FILE += ["c"+str(i)+"_run_log.txt"];
+
+  for i in range(0, NCORES):
+    cmd = cmd \
+      + " --define=core"+str(i)+"_BINARY=" + binary[i] \
+      + " --define=core"+str(i)+"_SIM_TARGET_OUTPUT_FILE=" + LOG_FILE[i]
+
+  cmd = cmd \
       + " --define=SHARED_RAM_L_NAME=SharedRAM_L."+str(pid) \
       + " --define=SYSTEM_RAM_L_NAME=SystemRAM_L."+str(pid) \
-      + " --define=SYSTEMRAM_DELAY=100" \
-      + " --define=SYSTEMROM_DELAY=100" \
-      + " --define=SYSTEM_RAM_L_DELAY=100" \
-      + " --define=SHARED_RAM_L_DELAY=100" \
-      + " --include=" + SUBSYS_DIR + "/sysbuilder/xtsc-run/multicore1c.inc"
+      + " --define=SYSTEMRAM_DELAY="+str(DELAY) \
+      + " --define=SYSTEMROM_DELAY="+str(DELAY) \
+      + " --define=SYSTEM_RAM_L_DELAY="+str(DELAY) \
+      + " --define=SHARED_RAM_L_DELAY="+str(DELAY) \
+      + " --include=" + SUBSYS_DIR + "/sysbuilder/xtsc-run/multicore"+str(NCORES)+"c.inc"
   return cmd
 
 def main(SHARED_MEM_ADDR):
@@ -52,7 +65,9 @@ def main(SHARED_MEM_ADDR):
   os.putenv('XTSC_PID', str(pid))
   xtensa_system = get_env_variable('XTENSA_SYSTEM')
   xtensa_core = get_env_variable('XTENSA_CORE')
-  binary = os.getcwd()+"/xa_af_hosted_dsp_test_core0"
+  binary=[]
+  for i in range(0,NCORES):
+    binary += [os.getcwd()+"/xa_af_hosted_dsp_test_core"+str(i)];
   cmd = xtsc_cmd(xtensa_core, xtensa_system, binary, pid, 1)    
   print(cmd)
   args = shlex.split(cmd)
@@ -82,8 +97,8 @@ def main(SHARED_MEM_ADDR):
 if __name__ == '__main__':
   if len(sys.argv) < 2:
       print("\nShared Memory Address Not Provided, default address is {}\n" .format(hex(SHMEM_ADDR)))
-      print("Usage: {} <addr>".format(sys.argv[0]))
-      print("Example: {} {:#x}\n".format(sys.argv[0], 0xC0000000))
+      print("Usage: {} <addr> <NCORES=1>".format(sys.argv[0]))
+      print("Example: {} {:#x} NCORES={:#d}(default 1)\n".format(sys.argv[0], 0xC0000000, NCORES))
       user_input = input("Proceed?[Y/N]:")
       if user_input == 'y' or user_input == 'Y':
           main(SHMEM_ADDR)
@@ -91,4 +106,9 @@ if __name__ == '__main__':
           sys.exit(1)
   else:
       shared_mem_addr = sys.argv[1]
+      if (len(sys.argv)>2):
+        _s1 = re.match("NCORES",sys.argv[2]);
+        if (_s1):
+            NCORES = int(_s1.string.split("=")[1])
+
       main(shared_mem_addr)

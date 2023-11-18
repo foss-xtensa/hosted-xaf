@@ -35,6 +35,7 @@
  ******************************************************************************/
 
 /* ...configuration options */
+#include "xaf-config-user.h"
 #include "xf-config.h"
 
 /* ...debugging support */
@@ -48,4 +49,3 @@
 
 /* ...shared memory interface */
 #include "xf-shmem.h"
-

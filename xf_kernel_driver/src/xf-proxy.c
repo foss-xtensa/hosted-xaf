@@ -35,11 +35,15 @@
 #define XF_PROXY_CLOSE_IOCTL            _IO('P', 0x1)
 
 /* ...stub - use coherent mapping between user- and kernel-space */
-#define XF_SHMEM_COHERENT               1
+#define XF_SHMEM_COHERENT               0
 
 #define XF_PROXY_DATA_PAYLOAD_OFFSET	0x4000
 
 #define XF_PROXY_MSG_PAYLOAD_OFFSET     0x40000
+
+#define HOST_TO_DSP_SYNC_PATTERN         0x55
+#define DSP_TO_HOST_SYNC_PATTERN         0x66
+#define DSP_TO_HOST_NOTIFY_PATTERN       0x77
 
 /*******************************************************************************
  * Local proxy data
@@ -59,6 +63,9 @@ typedef struct xf_client        xf_client_t;
 
 /* ...debugging data */
 typedef struct xf_dbg_data      xf_dbg_data_t;
+
+/* ...device structure */
+static struct device       *xf_device;
 
 /* ...execution message */
 struct xf_message {
@@ -156,6 +163,12 @@ struct xf_proxy {
 
 	/* ...pointer to first free message in the pool */
 	xf_message_t           *free;
+
+	/* ...IPC handshake flag from DSP to Kernel */
+	u32			sync_from_dsp;
+
+	/* ...IPC handshake flag from Kernel to DSP */
+	u32			sync_to_dsp;
 };
 
 /*******************************************************************************
@@ -216,10 +229,28 @@ int thread_function(void *pv)
     proxy = container_of(ipc, xf_proxy_t, ipc);
     pshmem = (char *)proxy->ipc.regs;
 
+    if (!proxy->sync_to_dsp)
+    {
+        writeb(HOST_TO_DSP_SYNC_PATTERN, &pshmem[IRQOUT_SYN]);
+        xf_ipc_assert(ipc);
+        proxy->sync_to_dsp = 1;
+    }
+
     while(!kthread_should_stop())
     {
-        //pr_info("In Thread Function %d\n", i);
-	    if(0x77 == readb(&pshmem[IRQIN_POL]))
+        if (!proxy->sync_from_dsp && (DSP_TO_HOST_SYNC_PATTERN == readb(&pshmem[IRQIN_SEL])))
+        {
+            proxy->sync_from_dsp = 1;
+            pr_info("DSP Sync successful\n");
+            xf_proxy_notify(ipc);
+            break;
+        }
+        msleep(500);
+    }
+
+    while(!kthread_should_stop())
+    {
+	    if(DSP_TO_HOST_NOTIFY_PATTERN == readb(&pshmem[IRQIN_POL]))
         {
             //pr_info("%s %d Pattern found, waking up\n", __func__,__LINE__);
             wake_up(pwaitq);
@@ -460,6 +491,8 @@ static inline u32 xf_shmem_process_responses(xf_proxy_t *proxy)
 	xf_message_t   *m;
 	u32             read_idx, write_idx;
 	int             status = 0;
+    u32             core = 0;
+    xf_proxy_ipc_data_t *ipc = xf_proxy_ipc_data(core);
 
 	/* ...get current values of read/write pointers in response queue */
 	read_idx = XF_PROXY_READ(proxy, rsp_read_idx);
@@ -484,10 +517,8 @@ static inline u32 xf_shmem_process_responses(xf_proxy_t *proxy)
 		/* ...get oldest not yet processed response */
 		response = XF_PROXY_RESPONSE(proxy, XF_QUEUE_IDX(read_idx));
 
-#if 0 //divya
 		/*	...synchronize memory contents */
 		XF_PROXY_INVALIDATE(response, sizeof(*response));
-#endif
 
 		/* ...fill message parameters */
 		m->id = response->id;
@@ -506,7 +537,7 @@ static inline u32 xf_shmem_process_responses(xf_proxy_t *proxy)
 			XF_PROXY_INVALIDATE(m->buffer, m->length);
 #endif
 
-		pr_info("%s %d rsp[id:%016llx]:(%08x,%u,%p) response->address:%x", __func__, __LINE__, (u64)m->id, m->opcode, m->length, m->buffer, response->address); //divya
+        pr_info("%s %d rsp[id:%016llx]:(%08x,%u,%p) address:%x", __func__, __LINE__, (u64)m->id, m->opcode, m->length, m->buffer, response->address);
 
 		/* ...advance local reading index copy */
 		read_idx = XF_QUEUE_ADVANCE_IDX(read_idx);
@@ -527,6 +558,8 @@ static inline u32 xf_shmem_process_commands(xf_proxy_t *proxy)
 	xf_message_t   *m;
 	u32             read_idx, write_idx;
 	int             status = 0;
+    u32             core = 0;
+    xf_proxy_ipc_data_t *ipc = xf_proxy_ipc_data(core);
 
 	/* ...get current value of peer read pointer */
 	write_idx = XF_PROXY_READ(proxy, cmd_write_idx);
@@ -565,7 +598,7 @@ static inline u32 xf_shmem_process_commands(xf_proxy_t *proxy)
 		pr_info("cmd[id:%016llx]: (%08x,%u,%08x)", (u64)command->id, command->opcode, command->length, command->address);
 
 		/* ...flush the content of the caches to main memory */
-		//divya XF_PROXY_FLUSH(command, sizeof(*command));
+		XF_PROXY_FLUSH(command, sizeof(*command));
 
 		/* ...return message back to the pool */
 		xf_msg_free(proxy, m);
@@ -586,6 +619,12 @@ static void xf_proxy_process(struct work_struct *w)
 {
 	xf_proxy_t *proxy = container_of(w, xf_proxy_t, work);
 	int         status;
+
+	if (!proxy->sync_from_dsp)
+	{
+	    pr_info("Awaiting DSP Sync...\n");
+	    return;
+	}
 
 	/* ...disable further interrupt delivery */
 	xf_ipc_disable(&proxy->ipc);
@@ -635,6 +674,7 @@ int __init xf_proxy_init(xf_proxy_ipc_data_t *ipc, u32 core, struct device *dev)
 {
 	xf_proxy_t     *proxy = container_of(ipc, xf_proxy_t, ipc);
 	xf_message_t   *m;
+	char           *pshmem;
 	int             i;
 
 	/* ...save proxy core identifier */
@@ -669,6 +709,13 @@ int __init xf_proxy_init(xf_proxy_ipc_data_t *ipc, u32 core, struct device *dev)
 	XF_PROXY_WRITE(proxy, cmd_write_idx, 0);
 	XF_PROXY_WRITE(proxy, rsp_read_idx, 0);
 	XF_PROXY_WRITE(proxy, rsp_write_idx, 0);
+
+	/* ...initialize handshake flags */
+	proxy->sync_from_dsp = 0;
+	proxy->sync_to_dsp = 0;
+    pshmem = (char *)proxy->ipc.regs;
+	writeb(0, &pshmem[IRQIN_SEL]);
+	writeb(0, &pshmem[IRQOUT_SYN]);
 
 	/* ...initialization completed */
 	pr_debug("IPC-%u interface initialized", core);
@@ -871,6 +918,8 @@ static inline int xf_cmd_free(xf_proxy_t *proxy, void *buffer, u32 length)
 /* ...associate client to given shared memory interface */
 static inline int xf_client_register(xf_client_t *client, u32 core)
 {
+	xf_proxy_t *proxy;
+
 	/* ...basic sanity checks */
 	if (core >= XF_CFG_MAX_CORES) {
 		pr_err("invalid core number: %u", core);
@@ -885,6 +934,26 @@ static inline int xf_client_register(xf_client_t *client, u32 core)
 
 	/* ...complete association (no communication with remote proxy here) */
 	client->proxy = &xf_proxy[core];
+
+	/* ...(re)initialize queues and indexes, this ensures fresh start each time even if last execution terminated with fatal error */
+	proxy = client->proxy;
+	if (proxy)
+	{
+		/* ...initialize proxy thread message queues */
+		xf_msg_queue_init(&proxy->command);
+		xf_msg_queue_init(&proxy->response);
+
+		/* ...initialize global busy queue */
+		init_waitqueue_head(&proxy->busy);
+		init_waitqueue_head(&proxy->wait);
+
+
+		/* ...intialize shared memory interface */
+		XF_PROXY_WRITE(proxy, cmd_read_idx, 0);
+		XF_PROXY_WRITE(proxy, cmd_write_idx, 0);
+		XF_PROXY_WRITE(proxy, rsp_read_idx, 0);
+		XF_PROXY_WRITE(proxy, rsp_write_idx, 0);
+	}
 
 	pr_debug("client-%016llx registered within proxy-%u", (u64)client->id, core);
 
@@ -1175,8 +1244,9 @@ static int xf_mmap(struct file *filp, struct vm_area_struct *vma)
 	xf_proxy_t     *proxy;
 	xf_client_t    *client;
 	unsigned long   size;
-	//unsigned long   pfn;
+    unsigned long   pfn;
 	int             r;
+    u32             core;
 
 	/* ...basic sanity checks */
 	client = xf_get_client(filp);
@@ -1192,6 +1262,7 @@ static int xf_mmap(struct file *filp, struct vm_area_struct *vma)
 	if (client->vm_start != 0)
 		return -EBUSY;
 
+    core = proxy->core;
 #if 0
 	/* ...unclear how to process that yet */
 	client->vma = vma;
@@ -1218,12 +1289,19 @@ static int xf_mmap(struct file *filp, struct vm_area_struct *vma)
 	vma->vm_private_data = client;
 
 	/* ...set page number of shared memory */
-	//pfn = __pa(XF_SHMEM_DATA(proxy)->buffer) >> PAGE_SHIFT;
+	pfn = __pa(XF_SHMEM_DATA(proxy)->buffer) >> PAGE_SHIFT;
 
 #if XF_SHMEM_COHERENT
 	/* ...make it non-cached for the moment - tbd */
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-#endif
+#else //XF_SHMEM_COHERENT
+	{
+	  pgprot_t prot = vma->vm_page_prot;
+	  prot = pgprot_writecombine(prot);
+	  vma->vm_page_prot = prot;
+	  //pr_info("L#%d %s end:%x start:%x end-start:%x pfn:%x offset:%x size:%x vm_page_prot(writecombine):%x", __LINE__, __func__, vma->vm_end, vma->vm_start, vma->vm_end - vma->vm_start, pfn, vma->vm_pgoff, size, vma->vm_page_prot);
+	}
+#endif //XF_SHMEM_COHERENT
 
 	/* ...remap shared memory to user-space */
 	r = vm_iomap_memory(vma, XF_PROXY_DATA_ADDRESS(core) + XF_PROXY_DATA_PAYLOAD_OFFSET, XF_PROXY_DATA_SIZE(core)); //mmap is ok 
@@ -1241,6 +1319,7 @@ static int xf_release(struct inode *inode, struct file *filp)
 {
 	xf_proxy_t     *proxy;
 	xf_client_t    *client;
+	char *pshmem;
 
 	/* ...basic sanity checks */
 	client = xf_get_client(filp);
@@ -1256,6 +1335,12 @@ static int xf_release(struct inode *inode, struct file *filp)
          * */
 	    kthread_stop(etx_thread);
 
+	    proxy->sync_to_dsp = 0;
+	    proxy->sync_from_dsp = 0;
+        pshmem = (char *)proxy->ipc.regs;
+	    writeb(0, &pshmem[IRQIN_SEL]);
+	    writeb(0, &pshmem[IRQOUT_SYN]);
+	    
 	    /* ...acquire global proxy lock */
 	    xf_lock(&proxy->lock);
 
@@ -1269,7 +1354,6 @@ static int xf_release(struct inode *inode, struct file *filp)
 	    xf_unlock(&proxy->lock);
 	}
 
-	pr_info("%s, %d", __func__, __LINE__);
 	pr_debug("release device(inode: %p, filp: %p)", inode, filp);
 
 	return 0;
@@ -1307,7 +1391,7 @@ static const struct file_operations xf_fops = {
 static struct class        *xf_class;
 
 /* ...device structure */
-static struct device       *xf_device;
+//static struct device       *xf_device;
 
 /* ...character devices range */
 static struct cdev          xf_cdev;
@@ -1323,7 +1407,7 @@ int __init xf_ipc_init(struct device *dev)
 {
 	u32 core = 0;
 	xf_proxy_ipc_data_t *ipc;
-	uint32_t size, size2;
+	u32 size, size2, size3;
 
 	ipc = xf_proxy_ipc_data(core);
 	if (!ipc) {
@@ -1339,15 +1423,17 @@ int __init xf_ipc_init(struct device *dev)
 
 	size = (XF_PROXY_DATA_SIZE(core) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 	size2 = (sizeof(xf_shmem_data_t) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    size3 = (sizeof(xf_shmem_data_t) - XF_PROXY_DATA_SIZE(core) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 	pr_info("%s, %d, %08x, %d size:%d sizeof(xf_shmem_data_t):%d PAGE_SIZE:%ld", __func__, __LINE__, XF_PROXY_DATA_ADDRESS(core), XF_PROXY_DATA_SIZE(core), size, size2, PAGE_SIZE);
 
-	if ((ipc->shmem = (xf_shmem_data_t *) ioremap(XF_PROXY_DATA_ADDRESS(core) + XF_PROXY_DATA_PAYLOAD_OFFSET - 0x3000, size2)) == NULL )
+    //if ((ipc->shmem = (xf_shmem_data_t *) ioremap(XF_PROXY_DATA_ADDRESS(core) + XF_PROXY_DATA_PAYLOAD_OFFSET - 0x3000, size2)) == NULL )
+    if ((ipc->shmem = (xf_shmem_data_t *) ioremap(XF_PROXY_DATA_ADDRESS(core) + XF_PROXY_DATA_PAYLOAD_OFFSET - 0x3000, size3)) == NULL )
 	{
 	    printk(KERN_ERR "Mapping Shared RAM failed\n");
 	    return -1;
 	}
-	pr_info("%s, %d, sizeof(ipc->shmem):%lu ipc->shmem:%lX, ipc->regs=%lX, buffer:%lX", __func__, __LINE__, \
-			(long unsigned int)sizeof(ipc->shmem), (long unsigned int)ipc->shmem, (long unsigned int)ipc->regs, (long unsigned int)(ipc->shmem)->buffer);
+    pr_info("%s, %d, sizeof(ipc->shmem):%lX ipc->shmem:%lX, ipc->regs=%lX, buffer:%lX size:%x size2:%x size3:%x", __func__, __LINE__, \
+        (long unsigned int)sizeof(ipc->shmem), (long unsigned int)ipc->shmem, (long unsigned int)ipc->regs, (long unsigned int)(ipc->shmem)->buffer, size, size2, size3);
 
 	xf_proxy_init(ipc, core, dev);
 

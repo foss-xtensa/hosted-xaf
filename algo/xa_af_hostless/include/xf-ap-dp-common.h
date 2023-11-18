@@ -123,11 +123,12 @@ typedef enum dsp_arg_idx_s{
     XF_DSP_THREAD_ARGS_IDX_STATS_COMP_BUF_CURR  = 9,
     XF_DSP_THREAD_ARGS_IDX_STATS_FRMWK_BUF_PEAK = 10,
     XF_DSP_THREAD_ARGS_IDX_STATS_FRMWK_BUF_CURR = 11,
-    XF_DSP_THREAD_ARGS_IDX_STATS_SHMEM_BUF_PEAK = 12,
-    XF_DSP_THREAD_ARGS_IDX_STATS_SHMEM_BUF_CURR = 13,
-    XF_DSP_THREAD_ARGS_IDX_STATS_WORKER_THREAD_STATS    = 14,
-    XF_DSP_THREAD_ARGS_IDX_STATS_CB_THREAD_STATS        = 15,
-    XF_DSP_THREAD_ARGS_IDX_WORKER_STACK_SIZE            = 16,
+    XF_DSP_THREAD_ARGS_IDX_STATS_FRMWK_AP_LOC_BUF = 12,
+    XF_DSP_THREAD_ARGS_IDX_STATS_SHMEM_BUF_PEAK = 13,
+    XF_DSP_THREAD_ARGS_IDX_STATS_SHMEM_BUF_CURR = 14,
+    XF_DSP_THREAD_ARGS_IDX_STATS_WORKER_THREAD_STATS    = 15,
+    XF_DSP_THREAD_ARGS_IDX_STATS_CB_THREAD_STATS        = 16,
+    XF_DSP_THREAD_ARGS_IDX_WORKER_STACK_SIZE            = 17,
     XF_DSP_THREAD_ARGS_IDX_MAX,
 }dsp_arg_idx_t;
 
@@ -135,3 +136,21 @@ typedef enum dsp_arg_idx_s{
 //#define XF_DSP_STRUCT_SIZE              (1536 * XF_CFG_CORES_NUM)
 #define XF_DSP_STRUCT_SIZE              (512 + 1536 * XF_CFG_CORES_NUM)
 #define XF_DSP_SHMEM_STRUCT_SIZE        (256 * XF_CFG_CORES_NUM)
+
+#ifndef XCHAL_DCACHE_LINESIZE
+#define XCHAL_DCACHE_LINESIZE	128
+#endif //XCHAL_DCACHE_LINESIZE
+
+/* Minimum component memory requirement is based on:
+ * (common scratch bytes) + (internal housekeeping data-structure bytes) + (XF_CFG_MESSAGE_POOL_SIZE*(sizeof msg 64b-aligned)(256*64) bytes)
+ * as referred to in ProgrammersGuide. 
+ * This macro is used in xf-core.c on the DSP side. XA_AUDIO_COMP_BUF_SIZE_MIN and this are equivalent. Any change here should reflect in XA_AUDIO_COMP_BUF_SIZE_MIN. */
+#define XA_DSP_COMP_BUF_SIZE_MIN (((XF_CORE_DATA(core)->worker_thread_scratch_size)[XAF_MEM_ID_COMP]) + 1024 + 256*64)
+
+/* Minimum component memory requirement is based on:
+ * (common scratch bytes) + (internal housekeeping data-structure bytes) + (XF_CFG_MESSAGE_POOL_SIZE*(sizeof msg 64b-aligned)(256*64) bytes)
+ * as referred to in ProgrammersGuide.
+ * This macro is used in xf-core.c on the Host side. XA_DSP_COMP_BUF_SIZE_MIN and this are equivalent. Any change here should reflect in XA_DSP_COMP_BUF_SIZE_MIN. */
+#define XA_AUDIO_COMP_BUF_SIZE_MIN      (pconfig->worker_thread_scratch_size[XAF_MEM_ID_COMP] + 1024 + 256*64)
+#define XA_AUDIO_COMP_BUF_SIZE_FAST_MIN 128 /* ...secondary comp mem pools which can be of lesser size */
+

@@ -29,6 +29,162 @@ Xtensa Audio Framework (XAF) - Hosted solution
 Revision History
 ======================================================================
 
+Version Hosted 1.0 API 3.3 : November 17, 2023
+
++ GA Release
+
++ Built and tested with RI.9 tools
+
++ [TENA-3231] FreeRTOS: updated commit ID which fixes tick-timer 
+  update issue (2ca806e59d8eb2490726f2ce1460f256ab593cf3).
+
++ [TENA-4141] Testbench: Runtime disconnect-without-delete commands
+  are now processed on a separate thread.
+
++ [TENA-4150] Mixer class change to fix a corner case by reordering 
+  input over and set input bytes API calls with related plugin 
+  changes.
+
++ [TENA-4151] memset xf_g_dsp structure pointer to avoid fsanitize
+  warning.
+
++ [TENA-4152] Restrict Hosted IPC kernel driver to communicate with
+  only one application. 
+
++ [TENA-4154] Testbench: Increased get_status_cid array size to fix 
+  array overflow error.
+
++ [TENA-4156] Added NULL check in xaf_adev_set_priorities API call for
+  adev pointer.
+
++ [TENA-4158] Plugin: Compile fix in opus-decoder for shared memory
+   macro MEM_START_DATA
+
++ NOTES:
+  1. Hosted XAF tests require a XTSC subsystem to compile and
+  run, so they would not compile and run OOB. Refer to Programmer's
+  guide for steps to:
+    - Build the subsystem,
+    - Build and run Hosted XAF tests with the built subsystem.
+  2. Only tested for subsystems with 1 Host + up to 8 HiFi DSPs.
+  3. Any reference to 'hostless' in the package source files can 
+  be ignored as the package is for hosted-XAF solution.
+  4. Limited testing is done with 64-bit version of Host OS.
+
++ KNOWN LIMITATIONS:
+  1. Package is available in TGZ format only.
+  2. The following features are not supported on 64-bit version of
+  Host Linux OS:
+     - Zero copy mode of xaf_comp_get_config_ext API
+     - Zero copy mode of xaf_comp_set_config_ext API
+  3. Multiple memory pool feature is only supported for 
+  XAF_MEM_ID_COMP to XAF_MEM_ID_COMP_FAST type of memory amongst 
+  enum XAF_MEM_ID.
+  4. MCPS, Memory numbers printed correspond to DSP which does not 
+  include Host side info.
+  5. IPC shared-memory between host IPC-kernel and main DSP is 
+  uncached.
+
+----------------------------------------------------------------------
+
+Version 0.9_Beta API 3.3 : August 18, 2023
+
++ Hosted XAF
+
++ Beta Release
+
++ Built and tested with RI.9 tools.
+
++ [TENA-3231] FreeRTOS timer interrupt issue is resolved and github
+  commit id is updated. This fix enables execution of
+  capturer/renderer based testbenches.
+
++ [TENA-3887] Changes in class-audio-codec and class-mixer to support
+  execution with partial input data.  
+
++ [TENA-3970] FLUSH/INVALIDATE macro cleanup and consolidation done
+  in XAF library.
+
++ [TENA-4112] Free-up temporary output buffer if xaf_comp_delete is
+  called before component was initialized (class-audio-codec).
+
++ Enabled hosted execution with one host and multiple DSP cores.
+
++ Enabled two-way handshake between host IPC and DSP-IPC for initial
+  sync.
+ 
++ Ensured re-initialization of queues and indexes in Linux kernel
+  driver.
+
++ Added a mem_pool_type check in xf-mem.h for robustness.
+
++ Enabled xaf_set_config_ext and xaf_get_config_ext API support with
+  zero-copy and non-zero copy mode in 32-bit version of Host OS. 
+
++ Made improvements in DSP-DSP synchronization mechanism by adding a
+  non-pattern store change before reset-sync procedure which uses 
+  handshake with a fixed pattern.
+
++ Fix for a corner case DSP local memset which was affected by 
+  Host-DSP interrupt, as interrupt-handler used a local memory 
+  resource which was being memset, causing a freertos test to hang,
+  hence avoided the meset of this COMP_ID pool, to be done at the
+  component appropriately.
+
++ Changes to enable memory usage and MCPS prints after execution
+  for NCORES>1.
+
++ Reduced the memory delay values from 100 to 1 in XTSC simulation 
+  command in cosim_launcher2.py file.
+
++ Added xaf-config-user.h for user configurable parameters such as 
+  specifying the shared memory address. Made necessary changes in
+  hifi-dpf and xf_kernel_driver to use shared memory address from
+  xaf-config-user.h.
+
++ Fixed a pointer issue in xaf_get_mem_stats API in xaf-api.c causing
+  a segfault in 64-bit version of Host OS.
+
++ Testbench changes:
+  1. Changes to support multi-core build.
+  2. Runtime command line parsing changes for NCORES>1 in the
+  testbenches that support command line parsing.
+  3. Updated initialization logic for AAC testbench to fix a corner
+  case. 
+  4. Corrected version prints during execution.
+
++ Plugin changes:
+  1. Necessary changes in mixer to support execution with partial
+  input data.
+
++ NOTES:
+  1. Hosted XAF tests require a XTSC subsystem to compile and
+  run, so they would not compile and run OOB. Refer to Programmer's
+  guide for steps to:
+    - Build the subsystem,
+    - Build and run Hosted XAF tests with the built subsystem.
+  2. Only tested for subsystems with 1 Host + up to 6 HiFi DSPs.
+  3. Any reference to 'hostless' in the package source files can 
+  be ignored as the package is for hosted-XAF solution.
+  4. Limited testing is done with 64-bit version of Host OS.
+  5. Not tested with L32EX core config variants.
+
++ KNOWN LIMITATIONS:
+  1. Package is available in TGZ format only.
+  2. The following features are not supported on 64-bit version of
+  Host Linux OS:
+     - Zero copy mode of xaf_comp_get_config_ext API
+     - Zero copy mode of xaf_comp_set_config_ext API
+  3. Multiple memory pool feature is only supported for 
+  XAF_MEM_ID_COMP to XAF_MEM_ID_COMP_FAST type of memory amongst 
+  enum XAF_MEM_ID.
+  4. MCPS, Memory numbers printed correspond to DSP which does not 
+  include Host side info.
+  5. IPC shared-memory between host IPC-kernel and main DSP is 
+  uncached.
+
+----------------------------------------------------------------------
+
 Version 0.5_Alpha API 3.2 : April 14, 2023
 
 + Hosted XAF
@@ -1365,4 +1521,4 @@ Version 0.7 API 1.0 : December 17, 2015
 + Beta release.
 
 ----------------------------------------------------------------------
-2023-04-14:22:11:/servers/scratch50g/nddivya/XX/XtDevTools/XtensaRegistry/RI-2022.9:808321:805904:784859::
+2023-11-17:16:17:/servers/scratch50g/nddivya/XX/XtDevTools/XtensaRegistry/RI-2022.9:855261:837726:855164::

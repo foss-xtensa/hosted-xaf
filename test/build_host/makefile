@@ -2,13 +2,15 @@
 .PHONY:
 
 CORE?="hifi4"
+NCORES?=1
 XA_PRIORITY ?= 0
+XA_ZERO_COPY ?= 0
 
-all all-dec: host-lib
-	$(MAKE) -f makefile_testbench XF_CORE_ID=0 XAF=host XA_RTOS=linux $@
+af_hostless all all-dec: host-lib
+	$(MAKE) -f makefile_testbench XF_CORE_ID=0 XAF=host XA_RTOS=linux XA_ZERO_COPY=$(XA_ZERO_COPY) XF_CFG_CORES_NUM=$(NCORES) $@
 
 host-lib: 
-	$(MAKE) -f makefile_host all install
+	$(MAKE) -f makefile_host XA_ZERO_COPY=$(XA_ZERO_COPY) XF_CFG_CORES_NUM=$(NCORES) all install
 
 run run-dec:
 	$(MAKE) -f makefile_testbench $@

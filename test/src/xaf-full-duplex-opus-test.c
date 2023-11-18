@@ -149,41 +149,55 @@ static int opus_dec_setup(void *p_decoder)
 #ifndef PACK_WS_DUMMY
         {
 #define OPUS_DEC_NUM_SET_PARAMS_EXT	1
-            int param_ext[OPUS_DEC_NUM_SET_PARAMS_EXT * 2];
+            uVOID param_ext[OPUS_DEC_NUM_SET_PARAMS_EXT * 2];
             WORD8 stream_map[XA_OPUS_MAX_NUM_CHANNELS]= {15,25,35,25,35,55,5,50};
-#if !defined (XA_ZERO_COPY) || (XF_CFG_CORES_NUM==1)
-            xaf_ext_buffer_t ext_buf[OPUS_DEC_NUM_SET_PARAMS_EXT];
-            memset(ext_buf, 0, sizeof(xaf_ext_buffer_t) * OPUS_DEC_NUM_SET_PARAMS_EXT);
 
-#else
+#if defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
             xaf_ext_buffer_t *ext_buf;
-            ext_buf = (xaf_ext_buffer_t *) ((UWORD32) shared_mem + shared_mem_used);
+            WORD8 *p_stream_map;
+#if defined(XAF_HOSTED_AP)
+            UWORD32 shared_mem_used_zc = 0;
+            UWORD32 shmem_size_zc = (OPUS_DEC_NUM_SET_PARAMS_EXT * sizeof(xaf_ext_buffer_t));
+            shmem_size_zc += sizeof(stream_map);
+            xaf_shmem_buffer_get(p_decoder, shmem_size_zc, &shared_mem);
+        
+            ext_buf = (xaf_ext_buffer_t *) ((uVOID) shared_mem);
+            memset(ext_buf, 0, (OPUS_DEC_NUM_SET_PARAMS_EXT * sizeof(xaf_ext_buffer_t)));
+            shared_mem_used_zc += (OPUS_DEC_NUM_SET_PARAMS_EXT * sizeof(xaf_ext_buffer_t));
+        
+            p_stream_map = (WORD8 *)((uVOID) shared_mem + shared_mem_used_zc);
+            shared_mem_used_zc += sizeof(stream_map);
+#else //XAF_HOSTED_AP
+            ext_buf = (xaf_ext_buffer_t *) ((uVOID) shared_mem + shared_mem_used);
             memset(ext_buf, 0, (OPUS_DEC_NUM_SET_PARAMS_EXT * sizeof(xaf_ext_buffer_t)));
             shared_mem_used += (OPUS_DEC_NUM_SET_PARAMS_EXT * sizeof(xaf_ext_buffer_t));
 
-            WORD8 *p_stream_map = (WORD8 *)((UWORD32) shared_mem + shared_mem_used);
+            p_stream_map = (WORD8 *)((uVOID) shared_mem + shared_mem_used);
             shared_mem_used += sizeof(stream_map);
             memcpy(p_stream_map, &stream_map, sizeof(stream_map));
-#endif
+#endif //XAF_HOSTED_AP
+#else //defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
+            xaf_ext_buffer_t ext_buf[OPUS_DEC_NUM_SET_PARAMS_EXT];
+            memset(ext_buf, 0, sizeof(xaf_ext_buffer_t) * OPUS_DEC_NUM_SET_PARAMS_EXT);
+#endif //defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
+
             ext_buf[0].max_data_size = sizeof(stream_map);
             ext_buf[0].valid_data_size = sizeof(stream_map);
-#if defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
+#if defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
             ext_buf[0].ext_config_flags |= XAF_EXT_PARAM_SET_FLAG(XAF_EXT_PARAM_FLAG_OFFSET_ZERO_COPY);
             ext_buf[0].data = (UWORD8 *) p_stream_map;
-#else
+#else //defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
             ext_buf[0].ext_config_flags &= XAF_EXT_PARAM_CLEAR_FLAG(XAF_EXT_PARAM_FLAG_OFFSET_ZERO_COPY);
             ext_buf[0].data = (UWORD8 *) stream_map;
-#endif
+#endif //defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
 
             param_ext[0*2+XA_EXT_CFG_ID_OFFSET] = XA_OPUS_DEC_CONFIG_PARAM_STREAM_MAP;
-            param_ext[0*2+XA_EXT_CFG_BUF_PTR_OFFSET] = (int) &ext_buf[0];
+            param_ext[0*2+XA_EXT_CFG_BUF_PTR_OFFSET] = (uVOID) &ext_buf[0];
 
-#if defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
-#if XF_LOCAL_IPC_NON_COHERENT
-        XF_IPC_FLUSH(ext_buf,  sizeof(xaf_ext_buffer_t));
-        XF_IPC_FLUSH(p_stream_map,  ext_buf->valid_data_size);
-#endif
-#endif
+#ifdef XA_ZERO_COPY
+            XF_IPC_FLUSH(ext_buf,  sizeof(xaf_ext_buffer_t));
+            XF_IPC_FLUSH(p_stream_map,  ext_buf->valid_data_size);
+#endif //XA_ZERO_COPY
             ret = xaf_comp_set_config_ext(p_decoder, OPUS_DEC_NUM_SET_PARAMS_EXT, param_ext);
         }
 #endif //PACK_WS_DUMMY
@@ -294,49 +308,61 @@ static int get_opus_dec_config(void *p_comp, xaf_format_t *comp_format)
     if (!raw_mode_enabled)
     {
 #define OPUS_DEC_NUM_GET_PARAMS_EXT	1
-        int param_ext[OPUS_DEC_NUM_GET_PARAMS_EXT * 2];
+        uVOID param_ext[OPUS_DEC_NUM_GET_PARAMS_EXT * 2];
         WORD8 stream_map[XA_OPUS_MAX_NUM_CHANNELS]= {0,0,0,0,0,0,0,0};
+#if defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
+        xaf_ext_buffer_t *ext_buf;
+        WORD8 *p_stream_map;
+#if defined(XAF_HOSTED_AP)
+        UWORD32 shared_mem_used_zc = 0;
+        UWORD32 shmem_size_zc = (OPUS_DEC_NUM_SET_PARAMS_EXT * sizeof(xaf_ext_buffer_t));
+        shmem_size_zc += sizeof(stream_map);
+        xaf_shmem_buffer_get(p_comp, shmem_size_zc, &shared_mem);
 
-#if !defined(XA_ZERO_COPY) || (XF_CFG_CORES_NUM == 1)
+        ext_buf = (xaf_ext_buffer_t *) ((uVOID) shared_mem + shared_mem_used_zc);
+        shared_mem_used_zc += (OPUS_DEC_NUM_SET_PARAMS_EXT * sizeof(xaf_ext_buffer_t));
+        memset(ext_buf, 0, (OPUS_DEC_NUM_GET_PARAMS_EXT *sizeof(xaf_ext_buffer_t)));
+        p_stream_map = (WORD8 *)((uVOID) shared_mem + shared_mem_used_zc);
+        shared_mem_used_zc += sizeof(stream_map);
+#else //defined(XAF_HOSTED_AP)
+        ext_buf = (xaf_ext_buffer_t *) ((uVOID) shared_mem + shared_mem_used);
+        shared_mem_used += (OPUS_DEC_NUM_GET_PARAMS_EXT * sizeof(xaf_ext_buffer_t));
+        memset(ext_buf, 0, (OPUS_DEC_NUM_GET_PARAMS_EXT *sizeof(xaf_ext_buffer_t)));
+        p_stream_map = (WORD8 *)((uVOID) shared_mem + shared_mem_used);
+        shared_mem_used += sizeof(stream_map);
+#endif //defined(XAF_HOSTED_AP)
+#else //defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
         xaf_ext_buffer_t ext_buf[OPUS_DEC_NUM_GET_PARAMS_EXT];
         memset(ext_buf, 0, sizeof(xaf_ext_buffer_t) * OPUS_DEC_NUM_GET_PARAMS_EXT);
-#else
-        xaf_ext_buffer_t *ext_buf;
-        ext_buf = (xaf_ext_buffer_t *) ((UWORD32) shared_mem + shared_mem_used);
-        shared_mem_used += (OPUS_DEC_NUM_GET_PARAMS_EXT * sizeof(xaf_ext_buffer_t));
-        memset(ext_buf, 0, (OPUS_DEC_NUM_GET_PARAMS_EXT * sizeof(xaf_ext_buffer_t)));
+#endif //defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
 
-        WORD8 *p_stream_map = (WORD8 *)((UWORD32) shared_mem + shared_mem_used);
-        shared_mem_used += sizeof(stream_map);
-#endif
         ext_buf[0].max_data_size = sizeof(stream_map);
         ext_buf[0].valid_data_size = sizeof(stream_map);
-#if defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
+#if defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
         ext_buf[0].ext_config_flags |= XAF_EXT_PARAM_SET_FLAG(XAF_EXT_PARAM_FLAG_OFFSET_ZERO_COPY);
         ext_buf[0].data = (UWORD8 *) p_stream_map;
-#else
+#else //defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
         ext_buf[0].ext_config_flags &= XAF_EXT_PARAM_CLEAR_FLAG(XAF_EXT_PARAM_FLAG_OFFSET_ZERO_COPY);
         ext_buf[0].data = (UWORD8 *) stream_map;
-#endif
+#endif //defined(XA_ZERO_COPY) && ((XF_CFG_CORES_NUM > 1) || defined(XAF_HOSTED_AP))
 
         param_ext[0*2+XA_EXT_CFG_ID_OFFSET] = XA_OPUS_DEC_CONFIG_PARAM_STREAM_MAP;
-        param_ext[0*2+XA_EXT_CFG_BUF_PTR_OFFSET] = (int) &ext_buf[0];
+        param_ext[0*2+XA_EXT_CFG_BUF_PTR_OFFSET] = (uVOID) &ext_buf[0];
 
-#if defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
-#if XF_LOCAL_IPC_NON_COHERENT
-    XF_IPC_FLUSH(ext_buf,  sizeof(xaf_ext_buffer_t));
-#endif
-#endif
+#ifdef XA_ZERO_COPY
+    	XF_IPC_FLUSH(ext_buf,  sizeof(xaf_ext_buffer_t));
+#endif //XA_ZERO_COPY
 
         ret = xaf_comp_get_config_ext(p_comp, OPUS_DEC_NUM_GET_PARAMS_EXT, param_ext);
         if(ret < 0)
             return ret;
-#if defined(XA_ZERO_COPY) && (XF_CFG_CORES_NUM > 1)
-#if XF_LOCAL_IPC_NON_COHERENT
-    XF_IPC_INVALIDATE(ext_buf,  sizeof(xaf_ext_buffer_t));
-    XF_IPC_INVALIDATE(ext_buf[0].data,  ext_buf[0].valid_data_size);
-    memcpy(stream_map, p_stream_map, ext_buf[0].valid_data_size);
-#endif
+#ifdef XA_ZERO_COPY
+        XF_IPC_INVALIDATE(ext_buf[0].data,  ext_buf[0].valid_data_size);
+        memcpy(stream_map, p_stream_map, ext_buf[0].valid_data_size);
+#endif //XA_ZERO_COPY
+
+#if defined(XA_ZERO_COPY) && defined(XAF_HOSTED_AP)
+        xaf_shmem_buffer_put(p_comp, &shared_mem);
 #endif
         printf("stream map: ");
         int i;
@@ -544,11 +570,11 @@ int main_task(int argc, char **argv)
 
     adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] =  audio_frmwk_buf_size;
     adev_config.audio_component_buffer_size[XAF_MEM_ID_COMP] = audio_comp_buf_size;
-#if (XF_CFG_CORES_NUM>1)
+#if (XF_CFG_CORES_NUM>1) && !defined(XAF_HOSTED_AP)
     adev_config.audio_shmem_buffer_size = XF_SHMEM_SIZE - audio_frmwk_buf_size*(1 + XAF_MEM_ID_DEV_MAX);
     adev_config.pshmem_dsp = shared_mem;
 #endif //(XF_CFG_CORES_NUM>1)
-    adev_config.core = XF_CORE_ID;
+    adev_config.core = XF_CORE_ID_MASTER;
     TST_CHK_API_ADEV_OPEN(p_adev, adev_config,  "xaf_adev_open");
 
     FIO_PRINTF(stdout, "Audio Device Ready\n");

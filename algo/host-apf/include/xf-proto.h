@@ -81,9 +81,9 @@ extern int      xf_unroute(xf_handle_t *src, UWORD32 s_port);
 extern int      xf_pause(xf_handle_t *comp, WORD32 port);
 extern int      xf_resume(xf_handle_t *comp, WORD32 port);
 extern int      xf_set_config(xf_handle_t *comp, void *buffer, UWORD32 length, UWORD32 cfg_ext_flag);
-extern int      xf_set_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WORD32 num_param, WORD32 *p_param, UWORD32 cfg_ext_flag);
+extern int      xf_set_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WORD32 num_param, pVOID p_param, UWORD32 cfg_ext_flag);
 extern int      xf_get_config(xf_handle_t *comp, void *buffer, UWORD32 length, UWORD32 cfg_ext_flag);
-extern int      xf_get_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WORD32 num_param, WORD32 *p_param, UWORD32 cfg_ext_flag);
+extern int      xf_get_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WORD32 num_param, pVOID p_param, UWORD32 cfg_ext_flag);
 extern int      xf_set_priorities(xf_proxy_t *proxy, UWORD32 core, UWORD32 n_rt_priorities, UWORD32 rt_priority_base, UWORD32 bg_priority);
 
 /* ...shared buffers operations */

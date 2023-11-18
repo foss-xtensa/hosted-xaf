@@ -169,6 +169,106 @@ static XA_ERRORCODE xa_mixer_do_execute_stereo_16bit(XAPcmMixer *d)
     /* ...reset produced bytes */
     d->produced = 0;
 
+    /* ...copy of input-bytes, decremented on consumption over iterations */
+    memset(d->consumed, 0, sizeof(d->consumed));
+    nout_remaining = (d->buffer_size - d->produced);
+    sample_size = ((d->pcm_width == 16) ? sizeof(WORD16) : sizeof(WORD32)) * d->channels;
+
+    {
+        WORD32 inports_active = XA_MIXER_MAX_TRACK_NUMBER;
+
+        /* ...process all tracks, iterate only on unequal samples at input ports */
+        inlen = d->buffer_size;
+
+        /* ...prepare individual tracks */
+        for (j = 0; j < XA_MIXER_MAX_TRACK_NUMBER; j++)
+        {
+            UWORD32 n = d->input_length[j];
+
+            /* ...check if we have input buffer available */
+            if (n)
+            {
+                /* ...assign input buffer pointer. */
+                XF_CHK_ERR(b[j] = d->input[j], XA_MIXER_EXEC_FATAL_INPUT);
+
+                /* ...set individual track volume/balance */
+                t32 = d->volume[j];
+                v_l[j] = (UWORD16)(t32 & 0xFFFF), v_r[j] = (UWORD16)(t32 >> 16);
+
+                /* ...advance the input pointer by sample-offset, required for unequal length input */
+                b[j] += (d->consumed[j] / ((d->pcm_width == 16) ? sizeof(WORD16) : sizeof(WORD32)));
+
+                /* ...input_size: bytes to process is the minimum of of all input port bytes */
+                inlen = (inlen < n) ? inlen : n;
+                /* ...output_size: bytes to process is at-most output port bytes */
+                inlen = (inlen < nout_remaining) ? inlen : nout_remaining;
+            }
+            else
+            {
+                /* ...output silence (multiply garbage in the scratch buffer by 0) */
+                b[j] = d->scratch;
+                v_l[j] = v_r[j] = 0;
+                inports_active -= (d->input_over[j]);
+            }
+
+            TRACE(PROCESS, _b("b[%u] = %p%s"), j, b[j], (n == 0 ? " - scratch" : ""));
+        }//for(;j;)
+
+        inlen = (inports_active)?inlen:0;
+
+        if(inlen)
+        {
+            frame_size = inlen / sample_size;
+
+            for (i=0; i < frame_size; i++)
+            {
+                WORD32 l32 = 0, r32 = 0;
+
+                /* ...fill-in every channel in our map (unrolls loop here) */
+                for (j = 0; j < XA_MIXER_MAX_TRACK_NUMBER; j++)
+                {
+                    /* ...left channel processing (no saturation here yet) */
+                    l32 += *b[j]++ * v_l[j];
+
+                    /* ...right channel processing */
+                    r32 += *b[j]++ * v_r[j];
+                }//for(;j;)
+
+                /* ...normalize (truncate towards -inf) and multiply by master volume */
+                l32 = ((l32 >> 12) * w_l) >> 12;
+                r32 = ((r32 >> 12) * w_r) >> 12;
+
+                /* ...saturate and store in buffer */
+                *output++ = DSP_SATURATE_S16(l32);
+                *output++ = DSP_SATURATE_S16(r32);
+            }//for(;i;)
+
+            for (j = 0; j < XA_MIXER_MAX_TRACK_NUMBER; j++)
+            {
+                if(d->input_length[j])
+                {
+                    d->input_length[j] -= frame_size * sample_size;
+                    d->consumed[j] += frame_size * sample_size;
+
+                    /* ...partial samples should be left unprocessed */
+                    if((WORD32)d->input_length[j] < sample_size)
+                    {
+                        /* ...update partial bytes as consumed */
+                        d->consumed[j] += d->input_length[j];
+                        d->input_length[j] = 0;
+                    }
+                }
+            }//for(;j;)
+            d->produced += frame_size * sample_size;
+        }//if(inlen)
+    }
+
+
+    /* ...put flag saying we have output buffer */
+    d->state |= XA_MIXER_FLAG_OUTPUT;
+
+    TRACE(PROCESS, _b("produced: %u bytes (%u samples)"), d->produced, ((d->pcm_width==16)?(d->produced>>1):(d->produced>>2)));
+
     for (j = 0, ports_inactive = 0, ports_completed = 0; j < XA_MIXER_MAX_TRACK_NUMBER; j++)
     {
         /* ...check if we have input buffer available */
@@ -191,112 +291,6 @@ static XA_ERRORCODE xa_mixer_do_execute_stereo_16bit(XAPcmMixer *d)
         ports_completed += (d->input_over[j]);
     }
     TRACE(PROCESS, _b("ports_inactive:%u completed:%d"), ports_inactive, ports_completed);
-
-    /* ...copy of input-bytes, decremented on consumption over iterations */
-    memset(d->consumed, 0, sizeof(d->consumed));
-    nout_remaining = (d->buffer_size - d->produced);
-    sample_size = ((d->pcm_width == 16) ? sizeof(WORD16) : sizeof(WORD32)) * d->channels;
-
-    do
-    {
-        WORD32 inports_active = XA_MIXER_MAX_TRACK_NUMBER;
-
-        /* ...process all tracks, iterate only on unequal samples at input ports */
-        inlen = d->buffer_size;
-
-        /* ...prepare individual tracks */
-        for (j = 0; j < XA_MIXER_MAX_TRACK_NUMBER; j++)
-        {
-            UWORD32 n = d->input_length[j];
-
-            /* ...check if we have input buffer available */
-            if (n == 0)
-            {
-                /* ...output silence (multiply garbage in the scratch buffer by 0) */
-                b[j] = d->scratch;
-                v_l[j] = v_r[j] = 0;
-                inports_active--;
-            }
-            else
-            {
-                /* ...assign input buffer pointer. */
-                XF_CHK_ERR(b[j] = d->input[j], XA_MIXER_EXEC_FATAL_INPUT);
-
-                /* ...set individual track volume/balance */
-                t32 = d->volume[j];
-                v_l[j] = (UWORD16)(t32 & 0xFFFF), v_r[j] = (UWORD16)(t32 >> 16);
-
-                /* ...advance the input pointer by sample-offset, required for unequal length input */
-                b[j] += (d->consumed[j] / ((d->pcm_width == 16) ? sizeof(WORD16) : sizeof(WORD32)));
-
-                /* ...input_size: bytes to process is the minimum of of all input port bytes */
-                inlen = (inlen < n) ? inlen : n;
-                /* ...output_size: bytes to process is at-most output port bytes */
-                inlen = (inlen < nout_remaining) ? inlen : nout_remaining;
-            }
-
-            TRACE(PROCESS, _b("b[%u] = %p%s"), j, b[j], (n == 0 ? " - scratch" : ""));
-        }
-
-        inlen = (inports_active)?inlen:0;
-
-        if(inlen)
-        {
-            frame_size = inlen / sample_size;
-
-            for (i=0; i < frame_size; i++)
-            {
-                WORD32     l32 = 0, r32 = 0;
-
-                /* ...fill-in every channel in our map (unrolls loop here) */
-                for (j = 0; j < XA_MIXER_MAX_TRACK_NUMBER; j++)
-                {
-                    /* ...left channel processing (no saturation here yet) */
-                    l32 += *b[j]++ * v_l[j];
-
-                    /* ...right channel processing */
-                    r32 += *b[j]++ * v_r[j];
-                }
-
-                /* ...normalize (truncate towards -inf) and multiply by master volume */
-                l32 = ((l32 >> 12) * w_l) >> 12;
-                r32 = ((r32 >> 12) * w_r) >> 12;
-
-                /* ...saturate and store in buffer */
-                *output++ = DSP_SATURATE_S16(l32);
-                *output++ = DSP_SATURATE_S16(r32);
-            }
-
-            for (j = 0; j < XA_MIXER_MAX_TRACK_NUMBER; j++)
-            {
-                if(d->input_length[j])
-                {
-                    d->input_length[j] -= frame_size * sample_size;
-                    d->consumed[j] += frame_size * sample_size;
-
-                    /* ...partial samples should be left unprocessed */
-                    if((WORD32)d->input_length[j] < sample_size)
-                    {
-                        /* ...update partial bytes as consumed */
-                        d->consumed[j] += d->input_length[j];
-                        d->input_length[j] = 0;
-                    }
-                }
-            }
-            d->produced += frame_size * sample_size;
-            nout_remaining = (d->buffer_size - d->produced);
-        }//if(inlen)
-    } while(inlen && nout_remaining);
-
-    /* ...memset rest of the output buffer */
-    memset(output, 0, d->buffer_size - d->produced);
-
-    d->produced = d->buffer_size;
-
-    /* ...put flag saying we have output buffer */
-    d->state |= XA_MIXER_FLAG_OUTPUT;
-
-    TRACE(PROCESS, _b("produced: %u bytes (%u samples)"), d->produced, d->frame_size);
 
     /* ...set complete flag saying we have consumed all available input and input is over */
     if(ports_completed == XA_MIXER_MAX_TRACK_NUMBER)
@@ -598,9 +592,9 @@ static XA_ERRORCODE xa_mixer_set_input_bytes(XAPcmMixer *d, WORD32 i_idx, pVOID 
     /* ...all is correct; set input buffer length in bytes */
     d->input_length[i_idx] = size;
 
-    if(size >= d->buffer_size)
+    if(size)
     {
-        /* ...reset input_over flag only when input-buffer worth of data is available, else retain the earlier state. */
+        /* ...reset input_over flag only when input data is available, else retain the earlier state. */
         d->input_over[i_idx] = 0;
     }
 

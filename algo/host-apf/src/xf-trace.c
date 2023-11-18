@@ -87,7 +87,7 @@ int xf_trace(const char *format, ...)
     /* ...output timestamp */
     b += sprintf(b, "[%08u] ", xf_timenow());
 
-#if (XF_CFG_CORES_NUM > 1)
+#if (XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP) && !defined(XAF_HOSTED_DSP)
     b += sprintf(b, "c[%d]", XF_CORE_ID);
 #endif
     /* ...output format string */

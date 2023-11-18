@@ -109,10 +109,16 @@ static inline void xf_ipi_resume_dsp_isr(UWORD32 core)
 #endif //XAF_HOSTED_DSP
 }
 
-#if XAF_HOSTED_DSP
-#define MEM_START                       0xE0000000
+#if defined(XAF_HOSTED_DSP)
+#define MEM_START                       XF_CFG_SHMEM_BASE_ADDRESS
+#define IRQOUT_SYNC_ADDR                (MEM_START + 0x100 + 0x80)
+#define IRQOUT_DSP0_ADDR                (MEM_START + 0x100 + 0x84)
 #define IRQOUT_POL_ADDR                 (MEM_START + 0x100 + 0x8c)
-#define DSP_TO_IPC_NOTIFY_PATTERN       0x77
+#define IRQOUT_SEL_ADDR                 (MEM_START + 0x100 + 0x90)
+#define DSP_TO_HOST_NOTIFY_PATTERN       0x77
+#define DSP_TO_HOST_SYNC_PATTERN         0x66
+#define HOST_TO_DSP_SYNC_PATTERN         0x55
+#define WDSP_TO_DSP0_NOTIFY_PATTERN      (0x1 << 1)
 
 #define XF_PROXY_DATA_PAYLOAD_OFFSET    0x00004000
 #define MEM_START_DATA                  (MEM_START + XF_PROXY_DATA_PAYLOAD_OFFSET)
@@ -124,11 +130,19 @@ static inline void xf_ipi_resume_dsp_isr(UWORD32 core)
 #endif //XAF_HOSTED_DSP
 
 /* ...assert IPI interrupt on remote core - board-specific */
-static inline void xf_ipi_assert(UWORD32 core)
+static inline void xf_ipi_assert(UWORD32 this_core, UWORD32 core)
 {
-#if XAF_HOSTED_DSP
-    char *pmem_pattern = (char *)IRQOUT_POL_ADDR;
-    pmem_pattern[0] = DSP_TO_IPC_NOTIFY_PATTERN;
+#if defined(XAF_HOSTED_DSP)
+    if(this_core == XF_CORE_ID_MASTER)
+    {
+      char *pmem_pattern = (char *)IRQOUT_POL_ADDR;
+      pmem_pattern[0] = DSP_TO_HOST_NOTIFY_PATTERN;
+    }
+    else
+    {
+      char *pmem_pattern = (char *)IRQOUT_DSP0_ADDR;
+      pmem_pattern[0] = WDSP_TO_DSP0_NOTIFY_PATTERN;
+    }
 #else //XAF_HOSTED_DSP
 	xf_core_ro_data_t *ro = XF_CORE_RO_DATA(core);
 

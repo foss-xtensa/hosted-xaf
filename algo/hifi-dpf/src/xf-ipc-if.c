@@ -48,23 +48,7 @@
                            macros
  ******************************************************************************/
 #if (XF_CFG_CORES_NUM>1) || XAF_HOSTED_DSP
-#ifndef CACHE_FIX
 #define CACHE_FIX   1
-#endif
-
-/* ...prevent instructions reordering */
-#define barrier()                           \
-    __asm__ __volatile__("": : : "memory")
-
-/* ...memory barrier */
-#define XF_IPC_BARRIER()                  \
-    __asm__ __volatile__("memw": : : "memory")
-
-#define XF_IPC_FLUSH(buf, length) \
-        ({ if ((length)) { barrier(); xthal_dcache_region_writeback((buf), (length)); XF_IPC_BARRIER(); } buf; })
-
-#define XF_IPC_INVALIDATE(buf, length) \
-        ({ if ((length)) { xthal_dcache_region_invalidate((buf), (length)); barrier(); } buf; })
 
 //TODO xf_ipc_handle_t g_ipc_handle[XF_CFG_CORES_NUM] = {NULL};
 xf_ipc_handle xf_g_ipc_handle;
@@ -153,19 +137,11 @@ static inline int xf_ipc_msg_enqueue(xf_ipc_msg_queue_t *queue, void *m, unsigne
         queue->head = m;
     else
     {
-#if (XF_LOCAL_IPC_NON_COHERENT)
-        {
-            /* ...invalidate before updating current m->next */
-            XF_IPC_INVALIDATE(queue->tail, msg_size);
-        }
-#endif //XF_LOCAL_IPC_NON_COHERENT
+        /* ...invalidate before updating current m->next */
+        XF_IPC_INVALIDATE(queue->tail, msg_size);
         *(void **)((unsigned int)(queue->tail) + next_offset) = m;
 #if CACHE_FIX
-#if (XF_LOCAL_IPC_NON_COHERENT)
-        {
-            XF_IPC_FLUSH(queue->tail, msg_size); //write m->next to memory
-        }
-#endif //XF_LOCAL_IPC_NON_COHERENT
+        XF_IPC_FLUSH(queue->tail, msg_size); //write m->next to memory
 #endif
     }
 
@@ -185,11 +161,7 @@ static inline void * xf_ipc_msg_dequeue(xf_ipc_msg_queue_t *queue, unsigned int 
     if (m)
     {
 #if CACHE_FIX
-#if (XF_LOCAL_IPC_NON_COHERENT)
-        {
-            XF_IPC_INVALIDATE(m, msg_size);
-        }
-#endif //XF_LOCAL_IPC_NON_COHERENT
+        XF_IPC_INVALIDATE(m, msg_size);
 #endif
         /* ...advance head to the next entry in the queue */
         if ((queue->head = (*(void **)((unsigned int)m + next_offset))) == NULL)
@@ -199,11 +171,7 @@ static inline void * xf_ipc_msg_dequeue(xf_ipc_msg_queue_t *queue, unsigned int 
         *(void **)((unsigned int)m + next_offset) = NULL;
 
 #if CACHE_FIX
-#if (XF_LOCAL_IPC_NON_COHERENT)
-        {
-            XF_IPC_FLUSH(m, msg_size);//to write m->next = NULL to memory
-        }
-#endif //XF_LOCAL_IPC_NON_COHERENT
+        XF_IPC_FLUSH(m, msg_size);//to write m->next = NULL to memory
 #endif
     }
 
@@ -214,7 +182,7 @@ int xf_ipc_open2(unsigned int core, xf_ipc_config_t *pcfg)
 {
     xf_core_data_t *cd;
     xf_ipc_queue_t *rw_ipc;
-    int aligned_offset;
+    int aligned_offset = 0;
     void *phandle = (void *)pcfg->phandle;
 
     /* ...malloc ipc handle, store pointer in g_ipc_handle[core] */
@@ -223,25 +191,26 @@ int xf_ipc_open2(unsigned int core, xf_ipc_config_t *pcfg)
     /* ...adjust the handle according to the structure's cache alignmnent requirement */
     pcfg->handle_size -= (xf_g_ipc_handle - pcfg->phandle);
 	pcfg->phandle += (xf_g_ipc_handle - pcfg->phandle);
+    TRACE(INIT, _b("c[%d], addr:%p size:%d@%d"), core, pcfg->phandle, pcfg->handle_size, __LINE__);
 
     /* ...initialize the shared memory structure between cores. This is done once at the master and later accessed by all cores */
     aligned_offset = XF_MM(sizeof(xf_ipc_struct_t));
-
-    /* ... update shmem pointer and size for next use */
- 	pcfg->phandle += aligned_offset;
  	pcfg->handle_size -= aligned_offset;
+ 	pcfg->phandle += aligned_offset;
+    /* ... update shmem pointer and size for next use */
+    TRACE(INIT, _b("c[%d], addr:%p size:%d@%d"), core, pcfg->phandle, pcfg->handle_size, __LINE__);
+
+    pcfg->handle_size = ((pcfg->handle_size + (sizeof(xf_mm_block_t) - 1)) & ~(sizeof(xf_mm_block_t) - 1));
+    pcfg->phandle = (pVOID) (((UWORD32)pcfg->phandle + (sizeof(xf_mm_block_t) - 1)) & ~(sizeof(xf_mm_block_t) - 1));
+    TRACE(INIT, _b("c[%d], addr:%p size:%d@%d"), core, pcfg->phandle, pcfg->handle_size, __LINE__);
 
     if(core == XF_CORE_ID_MASTER)
     {
         /* ... offset of 'next' in the type of message enqueue/dequeud in IPC queue */
         (XF_SHMEM_IPC_HANDLE(core))->msg_next_offset = pcfg->msg_next_offset;
         (XF_SHMEM_IPC_HANDLE(core))->xf_dsp_shmem_buffer = pcfg->phandle;
-#if (XF_LOCAL_IPC_NON_COHERENT)
-        {
-            XF_IPC_FLUSH(&(XF_SHMEM_IPC_HANDLE(core))->msg_next_offset, sizeof((XF_SHMEM_IPC_HANDLE(core))->msg_next_offset));
-            XF_IPC_FLUSH(&(XF_SHMEM_IPC_HANDLE(core))->xf_dsp_shmem_buffer, sizeof((XF_SHMEM_IPC_HANDLE(core))->xf_dsp_shmem_buffer));
-        }
-#endif //XF_LOCAL_IPC_NON_COHERENT
+        XF_IPC_FLUSH(&(XF_SHMEM_IPC_HANDLE(core))->msg_next_offset, sizeof((XF_SHMEM_IPC_HANDLE(core))->msg_next_offset));
+        XF_IPC_FLUSH(&(XF_SHMEM_IPC_HANDLE(core))->xf_dsp_shmem_buffer, sizeof((XF_SHMEM_IPC_HANDLE(core))->xf_dsp_shmem_buffer));
 
         /* ...initialize core-core non-component message queue. */
         cd = pcfg->cd;
@@ -267,12 +236,10 @@ int xf_ipc_open2(unsigned int core, xf_ipc_config_t *pcfg)
     /* ...interrupt type of this core can be known by other-cores only through shared memory, this is one time flushed if cache is enabled */
     rw_ipc->queue.interrupt[0] = Xthal_inttype[XF_PROC_INTERRUPT_NUMBER];
 
-#if (XF_LOCAL_IPC_NON_COHERENT)
     {
         XF_IPC_FLUSH(rw_ipc->lock, sizeof(xf_ipc_lock_t));
         XF_IPC_FLUSH(rw_ipc, sizeof(*rw_ipc));
     }
-#endif //XF_LOCAL_IPC_NON_COHERENT
 
     if(core == XF_CORE_ID_MASTER)
     {
@@ -281,7 +248,7 @@ int xf_ipc_open2(unsigned int core, xf_ipc_config_t *pcfg)
 
         /* ...worker core communication message pool */
         /* ...For now used only for core-deinit from master to worker DSPs */
-        if (xf_msg_pool_init(&XF_CORE_DATA(core)->dsp_dsp_shmem_pool, XF_CFG_CORES_NUM-1, core, 1, XAF_MEM_ID_COMP))
+        if (xf_msg_pool_init(&XF_CORE_DATA(core)->dsp_dsp_shmem_pool, XF_CFG_CORES_NUM-1, core, 1, XAF_MEM_ID_DEV_FAST))
         {
             return XAF_INVALIDPTR_ERR;
         }
@@ -290,13 +257,12 @@ int xf_ipc_open2(unsigned int core, xf_ipc_config_t *pcfg)
         (XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_peak += ((UWORD32)pcfg->phandle - (UWORD32)phandle);
         (XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_curr += ((UWORD32)pcfg->phandle - (UWORD32)phandle);
 
-#if (XF_LOCAL_IPC_NON_COHERENT)
         {
             XF_IPC_FLUSH(&(XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_peak, sizeof((XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_peak));
             XF_IPC_FLUSH(&(XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_curr, sizeof((XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_curr));
         }
-#endif //XF_LOCAL_IPC_NON_COHERENT
     }
+    TRACE(INIT, _b("c[%d] L#%d %s dsp_shmem_buf_size_peak:%d"), core, __LINE__, __func__, (XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_peak);
 
     return 0;
 }
@@ -314,71 +280,61 @@ int xf_ipc_close2(unsigned int core)
         __xf_event_destroy(&xf_g_dsp->msgq_event);
     }
 
-#if (XF_LOCAL_IPC_NON_COHERENT)
     {
         /* ... update shared memory stats for local use */
         XF_IPC_INVALIDATE(&(XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_peak, sizeof((XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_peak));
         XF_IPC_INVALIDATE(&(XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_curr, sizeof((XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_curr));
     }
-#endif //XF_LOCAL_IPC_NON_COHERENT
-
-    __xf_disable_interrupt(XF_PROC_INTERRUPT_NUMBER);
 
     return 0;
 }
 
-int xf_ipc_send2(unsigned int core /* dst */, void *msg, unsigned int msg_size, void *payload, unsigned int payload_size)
+int xf_ipc_send2(unsigned int this_core /* source */, unsigned int core /* dst */, void *msg, unsigned int msg_size, void *payload, unsigned int payload_size)
 {
     xf_ipc_queue_t *rw_ipc = XF_CORE_IPC_DATA(core);
 
     /* ...assure memory coherency as needed */
-#if (XF_LOCAL_IPC_NON_COHERENT)
-    {
-        /* ...flush msg, msg_size */
-        //XF_IPC_FLUSH(payload, payload_size); //this is done outside IPC-layer just before calling this function
+    /* ...flush msg, msg_size */
+    //XF_IPC_FLUSH(payload, payload_size); //this is done outside IPC-layer just before calling this function
 
-        XF_IPC_INVALIDATE(rw_ipc, sizeof(*rw_ipc)); //1 time
-        XF_IPC_INVALIDATE(rw_ipc->lock, sizeof(xf_ipc_lock_t));
-        /* ...acquire lock */
-        __xf_ipc_lock(rw_ipc->lock);
-        XF_IPC_FLUSH(rw_ipc->lock, sizeof(xf_ipc_lock_t));
+    XF_IPC_INVALIDATE(rw_ipc, sizeof(*rw_ipc)); //1 time
+    XF_IPC_INVALIDATE(rw_ipc->lock, sizeof(xf_ipc_lock_t));
+    /* ...acquire lock */
+    __xf_ipc_lock(rw_ipc->lock);
+    XF_IPC_FLUSH(rw_ipc->lock, sizeof(xf_ipc_lock_t));
 
-        /* ...invalidate msg queue struct */
-        //XF_IPC_INVALIDATE(rw_ipc, sizeof(*rw_ipc));
-        XF_IPC_INVALIDATE(&rw_ipc->queue, sizeof(rw_ipc->queue));
+    /* ...invalidate msg queue struct */
+    //XF_IPC_INVALIDATE(rw_ipc, sizeof(*rw_ipc));
+    XF_IPC_INVALIDATE(&rw_ipc->queue, sizeof(rw_ipc->queue));
 
-        /* ...submit ipc msg to queue */
-        xf_ipc_msg_enqueue(&rw_ipc->queue, msg, (XF_SHMEM_IPC_HANDLE(core))->msg_next_offset, msg_size);
+    /* ...submit ipc msg to queue */
+    xf_ipc_msg_enqueue(&rw_ipc->queue, msg, (XF_SHMEM_IPC_HANDLE(core))->msg_next_offset, msg_size);
 
-        /* ...flush msg queue struct */
-        //XF_IPC_FLUSH(rw_ipc, sizeof(*rw_ipc));
-        XF_IPC_FLUSH(&rw_ipc->queue, sizeof(rw_ipc->queue));
+    /* ...flush msg queue struct */
+    //XF_IPC_FLUSH(rw_ipc, sizeof(*rw_ipc));
+    XF_IPC_FLUSH(&rw_ipc->queue, sizeof(rw_ipc->queue));
 
-        XF_IPC_FLUSH(msg, msg_size);
+    XF_IPC_FLUSH(msg, msg_size);
 
-        //TRACE(CMD, _b("m:%p id:%016llx op:%08x len:%d buf:%p"), msg, ((xf_message_t*)msg)->id, ((xf_message_t*)msg)->opcode, ((xf_message_t*)msg)->length, ((xf_message_t*)msg)->buffer);
+    //TRACE(CMD, _b("m:%p id:%016llx op:%08x len:%d buf:%p"), msg, ((xf_message_t*)msg)->id, ((xf_message_t*)msg)->opcode, ((xf_message_t*)msg)->length, ((xf_message_t*)msg)->buffer);
 
-        /* ...release lock */
-        __xf_ipc_unlock(rw_ipc->lock);
-        XF_IPC_FLUSH(rw_ipc->lock, sizeof(xf_ipc_lock_t));
-    }
-#else
-    {
-        /* ...acquire lock */
-        __xf_ipc_lock(rw_ipc->lock);
-
-        /* ...submit ipc msg to queue */
-        xf_ipc_msg_enqueue(&rw_ipc->queue, msg, (XF_SHMEM_IPC_HANDLE(core))->msg_next_offset, msg_size);
-
-        //TRACE(CMD, _b("m:%p id:%016llx op:%08x len:%d buf:%p"), msg, (UWORD64)((xf_message_t*)msg)->id, ((xf_message_t*)msg)->opcode, ((xf_message_t*)msg)->length, ((xf_message_t*)msg)->buffer);
-
-        /* ...release lock */
-        __xf_ipc_unlock(rw_ipc->lock);
-    }
-#endif //XF_LOCAL_IPC_NON_COHERENT
+    /* ...release lock */
+    __xf_ipc_unlock(rw_ipc->lock);
+    XF_IPC_FLUSH(rw_ipc->lock, sizeof(xf_ipc_lock_t));
 
     /* ...assert interrupt on destination 'core' */
-    xf_ipc_assert(core, rw_ipc->queue.interrupt);
+#if defined (XAF_HOSTED_DSP)
+    if((core == XF_CORE_ID_MASTER) && (this_core != XF_CORE_ID_MASTER))
+    {
+        /* ... notify master-DSP */
+        xf_ipi_assert(this_core, core);
+    }
+    else
+#endif
+    {
+        /* ... notify worker-DSP */
+        xf_ipc_assert(core, rw_ipc->queue.interrupt);
+    }
 
     return 0;
 }
@@ -390,52 +346,33 @@ int xf_ipc_recv2(unsigned int core, void **ppm, unsigned int msg_size)
     void *msg;
 
     /* ...process memory coherency as required */
-#if (XF_LOCAL_IPC_NON_COHERENT)
+    XF_IPC_INVALIDATE(rw_ipc, sizeof(*rw_ipc)); //1 time
+    XF_IPC_INVALIDATE(rw_ipc->lock, sizeof(xf_ipc_lock_t));
+
+    /* ...acquire lock */
+    __xf_ipc_lock(rw_ipc->lock);
+    XF_IPC_FLUSH(rw_ipc->lock, sizeof(xf_ipc_lock_t));
+
+    /* ...invalidate msg queue struct */
+    XF_IPC_INVALIDATE(&rw_ipc->queue, sizeof(rw_ipc->queue));
+
+    /* ...retrieve ipc msg from queue */
+    msg = xf_ipc_msg_dequeue(&rw_ipc->queue, (XF_SHMEM_IPC_HANDLE(core))->msg_next_offset, msg_size);
+
+    /* ...invalidate retrieved msg, msg_size */
+    if (msg)
     {
-        XF_IPC_INVALIDATE(rw_ipc, sizeof(*rw_ipc)); //1 time
-        XF_IPC_INVALIDATE(rw_ipc->lock, sizeof(xf_ipc_lock_t));
-
-        /* ...acquire lock */
-        __xf_ipc_lock(rw_ipc->lock);
-        XF_IPC_FLUSH(rw_ipc->lock, sizeof(xf_ipc_lock_t));
-
-        /* ...invalidate msg queue struct */
-        //XF_IPC_INVALIDATE(rw_ipc, sizeof(*rw_ipc));
-        XF_IPC_INVALIDATE(&rw_ipc->queue, sizeof(rw_ipc->queue));
-
-        /* ...retrieve ipc msg from queue */
-        msg = xf_ipc_msg_dequeue(&rw_ipc->queue, (XF_SHMEM_IPC_HANDLE(core))->msg_next_offset, msg_size);
-
-        /* ...invalidate retrieved msg, msg_size */
-        if (msg)
-        {
-            /* ...flush msg queue struct */
-            //XF_IPC_FLUSH(rw_ipc, sizeof(*rw_ipc));
-            XF_IPC_FLUSH(&rw_ipc->queue, sizeof(rw_ipc->queue));
-
+        /* ...flush msg queue struct */
+        //XF_IPC_FLUSH(rw_ipc, sizeof(*rw_ipc));
+        XF_IPC_FLUSH(&rw_ipc->queue, sizeof(rw_ipc->queue));
 #if !CACHE_FIX
             XF_IPC_INVALIDATE(msg, msg_size); //its done in the dequeue function
 #endif
-           //TRACE(RSP, _b("m:%p id:%016llx op:%08x len:%d buf:%p"), msg, (UWORD64)((xf_message_t*)msg)->id, ((xf_message_t*)msg)->opcode, ((xf_message_t*)msg)->length, ((xf_message_t*)msg)->buffer);
-        }
-        /* ...release lock */
-        __xf_ipc_unlock(rw_ipc->lock);
-        XF_IPC_FLUSH(rw_ipc->lock, sizeof(xf_ipc_lock_t));
+       //TRACE(RSP, _b("m:%p id:%016llx op:%08x len:%d buf:%p"), msg, (UWORD64)((xf_message_t*)msg)->id, ((xf_message_t*)msg)->opcode, ((xf_message_t*)msg)->length, ((xf_message_t*)msg)->buffer);
     }
-#else
-    {
-        /* ...acquire lock */
-        __xf_ipc_lock(rw_ipc->lock);
-
-        /* ...retrieve ipc msg from queue */
-        msg = xf_ipc_msg_dequeue(&rw_ipc->queue, (XF_SHMEM_IPC_HANDLE(core))->msg_next_offset, msg_size);
-
-        //if(msg) {TRACE(RSP, _b("m:%p id:%0i16llx op:%08x len:%d buf:%p"), msg, (UWORD64)((xf_message_t*)msg)->id, ((xf_message_t*)msg)->opcode, ((xf_message_t*)msg)->length, ((xf_message_t*)msg)->buffer);}
-
-        /* ...release lock */
-        __xf_ipc_unlock(rw_ipc->lock);
-    }
-#endif //XF_LOCAL_IPC_NON_COHERENT
+    /* ...release lock */
+    __xf_ipc_unlock(rw_ipc->lock);
+    XF_IPC_FLUSH(rw_ipc->lock, sizeof(xf_ipc_lock_t));
 
     /* ...return message */
     *(void **)ppm = msg;
@@ -471,11 +408,8 @@ int xf_ipc_wait2(unsigned int core)
 int xf_ipc_b2a_flush(unsigned int core, void **buffer, unsigned int buf_size)
 {
     /* ...translate *buffer address, if required */
-
-#if (XF_LOCAL_IPC_NON_COHERENT)
     /* ...flush *buffer, size */
     XF_IPC_FLUSH(*buffer, buf_size);
-#endif //XF_LOCAL_IPC_NON_COHERENT
 
     return 0;
 }
@@ -483,11 +417,8 @@ int xf_ipc_b2a_flush(unsigned int core, void **buffer, unsigned int buf_size)
 int xf_ipc_a2b_invalidate(unsigned int core, void **buffer, unsigned int buf_size)
 {
     /* ...translate *buffer address, if required */
-
-#if (XF_LOCAL_IPC_NON_COHERENT)
     /* ...invalidate *buffer, size */
     XF_IPC_INVALIDATE(*buffer, buf_size);
-#endif //XF_LOCAL_IPC_NON_COHERENT
 
     return 0;
 }

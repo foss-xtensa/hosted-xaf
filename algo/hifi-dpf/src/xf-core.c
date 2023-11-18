@@ -616,12 +616,21 @@ static int xf_proxy_get_stats(UWORD32 core, xf_message_t *m)
     for(i = XAF_MEM_ID_COMP; i <= XAF_MEM_ID_COMP_MAX; i++)
     {
         pstats->dsp_comp_buf_size_peak[i] = (*xf_g_dsp->pdsp_comp_buf_size_peak)[i];
+        if((i == XAF_MEM_ID_COMP) && (pstats->dsp_comp_buf_size_peak[i] < XA_DSP_COMP_BUF_SIZE_MIN))
+        {
+            /* ...ID_COMP consists of minimum COMP memory required with internal overheads other than components */
+            pstats->dsp_comp_buf_size_peak[i] = XA_DSP_COMP_BUF_SIZE_MIN;
+        }
     }
 
 #if (XF_CFG_CORES_NUM > 1)
-    /* ...DSP-DSP shmem */
+    /* ...DSP-DSP shmem, invalidate to get the latest value before use. */
+    XF_IPC_INVALIDATE(&(XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_peak, sizeof((XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_peak));
+
     pstats->dsp_shmem_buf_size_peak = (XF_SHMEM_IPC_HANDLE(core))->dsp_shmem_buf_size_peak;
 #endif
+
+    pstats->dsp_framework_local_buf_size = xf_g_dsp->ap_frmwk_local_memory;
 
     /* ...frmwk shmem */
     for(i = XAF_MEM_ID_DEV; i <= XAF_MEM_ID_DEV_MAX; i++)
@@ -1045,7 +1054,7 @@ void xf_msg_submit(xf_message_t *m)
         }
 
         /* ...put message into local IPC queue */
-        xf_ipc_send2(dst, (void*)m, sizeof(*m), m->buffer, m->length);
+        xf_ipc_send2(src, dst, (void*)m, sizeof(*m), m->buffer, m->length);
     }
     else
 #endif //XF_CFG_CORES_NUM
@@ -1118,7 +1127,7 @@ void xf_msg_complete(xf_message_t *m)
             xf_ipc_b2a_flush(src, &m->buffer, m->length); /* ...flush the payload */
 
             /* ...put message into local IPC queue */
-            xf_ipc_send2(dst, (void*)m, sizeof(*m), m->buffer, m->length);
+            xf_ipc_send2(src, dst, (void*)m, sizeof(*m), m->buffer, m->length);
         }
 #else //XF_CFG_CORES_NUM
         /* ...return message to proxy */
@@ -1471,7 +1480,7 @@ int xf_core_deinit(UWORD32 core)
 
             //xf_ipc_b2a_flush(core, &m->buffer, m->length); /* ...flush the payload, not required if m->buffer == NULL */
             /* ...put message into local IPC queue */
-            xf_ipc_send2(dst, (void*)m, sizeof(*m), m->buffer, m->length);
+            xf_ipc_send2(core, dst, (void*)m, sizeof(*m), m->buffer, m->length);
         }
 
         /* ...wait for interrupt from other cores, for deinit confirmation */

@@ -236,7 +236,7 @@ int main_task(int argc, char **argv)
     adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] =  audio_frmwk_buf_size;
     adev_config.audio_component_buffer_size[XAF_MEM_ID_COMP] = audio_comp_buf_size;
     adev_config.core = XF_CORE_ID;
-#if (XF_CFG_CORES_NUM>1)
+#if (XF_CFG_CORES_NUM>1) && !defined(XAF_HOSTED_AP)
     adev_config.audio_shmem_buffer_size = XF_SHMEM_SIZE - audio_frmwk_buf_size*(1 + XAF_MEM_ID_DEV_MAX);
     adev_config.pshmem_dsp = shared_mem;
 #endif //(XF_CFG_CORES_NUM>1)
@@ -319,6 +319,9 @@ int main_task(int argc, char **argv)
     mem_exit();
 #ifdef XAF_PROFILE
 #ifdef XAF_HOSTED_AP
+#if (XF_CORE_ID == XF_CORE_ID_MASTER)
+    dsp_comps_cycles = ((xaf_perf_stats_t *)perf_stats)[XF_CORE_ID_MASTER].dsp_comps_cycles;
+#endif
     MCPS_per_image = (double)dsp_comps_cycles/ ((num_bytes_read/XA_PERSON_DETECT_FRAME_SIZE) * 1000000.0);
 #else //XAF_HOSTED_AP
     MCPS_per_image = (double)pd_inference_cycles / ((num_bytes_read/XA_PERSON_DETECT_FRAME_SIZE) * 1000000.0);

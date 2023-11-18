@@ -97,6 +97,9 @@ typedef enum {
     XF_POOL_FRMWK_EVENT_BUF,
 #endif
     XF_POOL_FRMWK_EXT_CFG,
+#if defined(XAF_HOSTED_AP) && (XA_ZERO_COPY)
+    XF_POOL_FRMWK_EXT_CFG_ZC,
+#endif //defined(XAF_HOSTED_AP)
     XF_POOL_FRMWK_MAX
 } XAF_MEM_POOL_FRMWK_LOCAL;
 

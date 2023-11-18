@@ -48,10 +48,18 @@
 
 /* ...basic cache operations */
 #define XF_PROXY_INVALIDATE(addr, len)  \
-	do { dma_sync_single_for_cpu(NULL, virt_to_phys(addr), len, DMA_FROM_DEVICE); mb(); } while (0)
+	do {\
+	unsigned long phys_addr = XF_PROXY_DATA_ADDRESS(core) + XF_PROXY_DATA_PAYLOAD_OFFSET - 0x3000 + (unsigned long)((size_t)addr - (size_t)ipc->shmem);\
+	dma_sync_single_for_cpu(xf_device, phys_addr, len, DMA_FROM_DEVICE); mb();\
+	/*dma_sync_single_for_cpu(NULL, virt_to_phys(addr), len, DMA_FROM_DEVICE); mb();*/\
+	} while (0)
 
 #define XF_PROXY_FLUSH(addr, len)       \
-	do { mb(); dma_sync_single_for_device(NULL, virt_to_phys(addr), len, DMA_TO_DEVICE); } while (0)
+	do {\
+	unsigned long phys_addr = XF_PROXY_DATA_ADDRESS(core) + XF_PROXY_DATA_PAYLOAD_OFFSET - 0x3000 + (unsigned long)((size_t)addr - (size_t)ipc->shmem);\
+	mb(); dma_sync_single_for_device(xf_device, phys_addr, len, DMA_TO_DEVICE);\
+	/*mb(); dma_sync_single_for_device(NULL, virt_to_phys(addr), len, DMA_TO_DEVICE);*/\
+	} while (0)
 
 /*******************************************************************************
  * Memory structures
@@ -237,6 +245,7 @@ static inline void lx_adsp_write(xf_proxy_ipc_data_t *ipc, u32 reg, u32 val)
 #define STATVECTORSEL	                0x14
 #define IRQOUT_STS	                    0x40
 #define IRQOUT_CLR	                    0x48
+#define IRQOUT_SYN	                    0x80
 #define IRQIN_SET	                    0x84
 #define IRQIN_POL	                    0x8c
 #define IRQIN_SEL	                    0x90

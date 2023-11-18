@@ -854,7 +854,7 @@ int xf_resume(xf_handle_t *comp, WORD32 port)
 	return msg.error;
 }
 
-static inline int xf_prepare_ext_config(xf_proxy_t *proxy, WORD32 *p_param, WORD32 num_param, void *buffer, UWORD32 set_cfg_flag /* 1 for set-cfg, 0 for get-cfg */)
+static inline int xf_prepare_ext_config(xf_proxy_t *proxy, uVOID *p_param, WORD32 num_param, void *buffer, UWORD32 set_cfg_flag /* 1 for set-cfg, 0 for get-cfg */)
 {
     UWORD32                 message_size_total = 0;
     UWORD32                 desc_len;
@@ -866,7 +866,7 @@ static inline int xf_prepare_ext_config(xf_proxy_t *proxy, WORD32 *p_param, WORD
 
     for(i = 0, k = 0; i < num_param; i++, k += 2)
     {
-        smsg->desc.id = p_param[k + XA_EXT_CFG_ID_OFFSET];
+        smsg->desc.id = (UWORD32)p_param[k + XA_EXT_CFG_ID_OFFSET];
 
         app_ext_buf   = (xaf_ext_buffer_t *) p_param[k + XA_EXT_CFG_BUF_PTR_OFFSET];
 
@@ -876,41 +876,47 @@ static inline int xf_prepare_ext_config(xf_proxy_t *proxy, WORD32 *p_param, WORD
         if (XAF_CHK_EXT_PARAM_FLAG(app_ext_buf->ext_config_flags, XAF_EXT_PARAM_FLAG_OFFSET_ZERO_COPY)) //(zero_copy_flag)
         {
             /* ...zero copy - assign the buffer from application directly */
-            *(UWORD32 *)smsg->data = (UWORD32) app_ext_buf;
+            *(UWORD32 *)smsg->data = xf_proxy_b2a(proxy, app_ext_buf);
+            app_ext_buf->data = (UWORD8 *)xf_proxy_b2a(proxy, app_ext_buf->data);
         }
         else
         {
+            pVOID pxf_ext_buf_data;
             /* ...non zero copy */
             xf_ext_buf    = (xaf_ext_buffer_t *) ((uVOID)smsg + sizeof(xf_ext_param_msg_t) + sizeof(UWORD32));
 
             xf_ext_buf->max_data_size    = app_ext_buf->max_data_size;
             xf_ext_buf->valid_data_size  = app_ext_buf->valid_data_size;
             xf_ext_buf->ext_config_flags = app_ext_buf->ext_config_flags;
-            xf_ext_buf->data             = (UWORD8 *) ((UWORD32)xf_ext_buf + sizeof(xaf_ext_buffer_t));
+            //xf_ext_buf->data             = (UWORD8 *) ((uVOID)xf_ext_buf + sizeof(xaf_ext_buffer_t));
+            pxf_ext_buf_data             = (UWORD8 *) ((uVOID)xf_ext_buf + sizeof(xaf_ext_buffer_t));
 
             if (set_cfg_flag)
             {
                 /* ...copy data bytes from external buffer to internal buffer. */
-                memcpy(xf_ext_buf->data, app_ext_buf->data, app_ext_buf->max_data_size);
+                //memcpy(xf_ext_buf->data, app_ext_buf->data, app_ext_buf->max_data_size);
+                memcpy(pxf_ext_buf_data, app_ext_buf->data, app_ext_buf->max_data_size);
             }
             else
             {
                 /* ...zero fill the buffer before sending out */
-                memset(xf_ext_buf->data, 0, xf_ext_buf->max_data_size);
+                //memset(xf_ext_buf->data, 0, xf_ext_buf->max_data_size);
+                memset(pxf_ext_buf_data, 0, xf_ext_buf->max_data_size);
             }
 
             /* ...4 byte alignment is required for accessing next param structure + sizeof(xaf_ext_buffer_t) */
             desc_len += ((xf_ext_buf->max_data_size + (XAF_4BYTE_ALIGN-1)) & ~(XAF_4BYTE_ALIGN-1)) + sizeof(xaf_ext_buffer_t);
 
             /* ... ext buffer contains the data */
-	        xf_ext_buf->data             = (UWORD8 *)xf_proxy_b2a(proxy, (void *)xf_ext_buf->data);
+            //xf_ext_buf->data             = (UWORD8 *)xf_proxy_b2a(proxy, (void *)xf_ext_buf->data);
+            xf_ext_buf->data             = (UWORD8 *)xf_proxy_b2a(proxy, (void *)pxf_ext_buf_data); /* ... ->data is the buffer pointer, hence needs a b2a. */
             *(UWORD32 *)smsg->data       = xf_proxy_b2a(proxy, xf_ext_buf);
         }
 
         smsg->desc.length = desc_len;
 
         /* ...for next parameter */
-        smsg = (xf_ext_param_msg_t *)((UWORD32)smsg + sizeof(xf_ext_param_msg_t) + desc_len);
+        smsg = (xf_ext_param_msg_t *)((uVOID)smsg + sizeof(xf_ext_param_msg_t) + desc_len);
 
         message_size_total += sizeof(xf_ext_param_msg_t) + desc_len;
     }
@@ -918,7 +924,7 @@ static inline int xf_prepare_ext_config(xf_proxy_t *proxy, WORD32 *p_param, WORD
     return message_size_total;
 }
 
-int xf_set_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WORD32 num_param, WORD32 *p_param, UWORD32 cfg_ext_flag)
+int xf_set_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WORD32 num_param, pVOID pparam, UWORD32 cfg_ext_flag)
 {
     xf_proxy_t             *proxy = comp->proxy;
     xf_user_msg_t           msg;
@@ -929,11 +935,12 @@ int xf_set_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WOR
 
     if(cfg_ext_flag)
     {
-        message_size_total = xf_prepare_ext_config(proxy, p_param, num_param, buffer, 1);
+        message_size_total = xf_prepare_ext_config(proxy, (uVOID *)pparam, num_param, buffer, 1);
         XF_CHK_RANGE_UNLOCK(proxy, message_size_total, sizeof(UWORD32), length);
     }
     else
     {
+        UWORD32 *p_param = (UWORD32 *)pparam;
         xf_set_param_msg_t *smsg = (xf_set_param_msg_t *)buffer;
 
         k = 0;
@@ -968,7 +975,7 @@ int xf_set_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WOR
 	return msg.error;
 }
 
-int xf_get_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WORD32 num_param, WORD32 *p_param, UWORD32 cfg_ext_flag)
+int xf_get_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WORD32 num_param, pVOID pparam, UWORD32 cfg_ext_flag)
 {
     xf_proxy_t             *proxy = comp->proxy;
     xf_user_msg_t           msg;
@@ -980,11 +987,12 @@ int xf_get_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WOR
 
     if(cfg_ext_flag)
     {
-        message_size_total = xf_prepare_ext_config(proxy, p_param, num_param, buffer, 0);
+        message_size_total = xf_prepare_ext_config(proxy, (uVOID *)pparam, num_param, buffer, 0);
         XF_CHK_RANGE_UNLOCK(proxy, message_size_total, sizeof(UWORD32), length);
     }
     else
     {
+        UWORD32 *p_param = (UWORD32 *)pparam;
         xf_get_param_msg_t  *smsg = (xf_get_param_msg_t *)buffer;
 
         for (i=0, k=0; i<num_param; i++,k+=2)
@@ -1016,11 +1024,12 @@ int xf_get_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WOR
     /* ...response path, return get-config data to the application */
     if(cfg_ext_flag)
     {
+        uVOID *p_param_ext = (uVOID *)pparam;
         xf_ext_param_msg_t *smsg = (xf_ext_param_msg_t *)buffer;
 
         for(i = 0, k = 0; i < num_param; i++, k += 2)
         {
-            xaf_ext_buffer_t *app_ext_buf   = (xaf_ext_buffer_t *) p_param[k + XA_EXT_CFG_BUF_PTR_OFFSET];
+            xaf_ext_buffer_t *app_ext_buf   = (xaf_ext_buffer_t *) p_param_ext[k + XA_EXT_CFG_BUF_PTR_OFFSET];
             XF_CHK_PTR_UNLOCK(proxy, app_ext_buf);
 
             /* ...4 bytes buffer pointer in smsg */
@@ -1028,15 +1037,17 @@ int xf_get_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WOR
 
             if (!XAF_CHK_EXT_PARAM_FLAG(app_ext_buf->ext_config_flags, XAF_EXT_PARAM_FLAG_OFFSET_ZERO_COPY))
             {
-                xaf_ext_buffer_t *xf_ext_buf    = (xaf_ext_buffer_t *) ((UWORD32)smsg + sizeof(xf_ext_param_msg_t) + sizeof(UWORD32));
+                xaf_ext_buffer_t *xf_ext_buf    = (xaf_ext_buffer_t *) ((uVOID)smsg + sizeof(xf_ext_param_msg_t) + sizeof(UWORD32));
 
                 app_ext_buf->max_data_size      = xf_ext_buf->max_data_size;
                 app_ext_buf->valid_data_size    = xf_ext_buf->valid_data_size;
                 app_ext_buf->ext_config_flags   = xf_ext_buf->ext_config_flags;
-		        xf_ext_buf->data                = xf_proxy_a2b(proxy, (uVOID)xf_ext_buf->data);
+                //xf_ext_buf->data                = xf_proxy_a2b(proxy, (uVOID)xf_ext_buf->data);
+                pVOID pxf_ext_buf_data          = xf_proxy_a2b(proxy, (uVOID)xf_ext_buf->data);
 
                 /* ...copy data bytes from internal to external buffer pointer. */
-                memcpy(app_ext_buf->data, xf_ext_buf->data, xf_ext_buf->max_data_size);
+                //memcpy(app_ext_buf->data, xf_ext_buf->data, xf_ext_buf->max_data_size);
+                memcpy(app_ext_buf->data, pxf_ext_buf_data, xf_ext_buf->max_data_size);
 
                 /* ...4 byte alignment is required for accessing next param structure + sizeof(xaf_ext_buffer_t) */
                 desc_len += ((xf_ext_buf->max_data_size + (XAF_4BYTE_ALIGN-1)) & ~(XAF_4BYTE_ALIGN-1)) + sizeof(xaf_ext_buffer_t);
@@ -1047,6 +1058,7 @@ int xf_get_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WOR
     }
     else
     {
+        UWORD32 *p_param = (UWORD32 *)pparam;
         xf_get_param_msg_t *smsg = (xf_get_param_msg_t *)buffer;
 
         for (i=0,k=1; i<num_param; i++,k+=2)
@@ -1057,7 +1069,7 @@ int xf_get_config_with_lock(xf_handle_t *comp, void *buffer, UWORD32 length, WOR
 
     xf_proxy_unlock(proxy);
 
-	return msg.error;
+    return msg.error;
 }
 
 int xf_set_priorities(xf_proxy_t *proxy, UWORD32 core, UWORD32 n_rt_priorities,

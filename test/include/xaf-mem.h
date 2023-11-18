@@ -40,12 +40,12 @@ void* mem_init();
 void mem_exit();
 int mem_get_alloc_size(mem_obj_t* mem_handle, int id);
 
-#if 0
+#ifndef XAF_HOSTED_AP
 #include <xtensa/hal.h>
 static inline int xaf_update_mpu(void)
 {
     int err = XTHAL_SUCCESS;
-#if XCHAL_HAVE_EXCLUSIVE
+#if XCHAL_HAVE_EXCLUSIVE && (XF_CFG_CORES_NUM > 1)
 #define EXCLUSIVE_SHARED_MEMORY_MAP_INDEX   25
     xthal_MPU_entry entry[XCHAL_MPU_ENTRIES];
     if((err = xthal_read_map(entry)) == XTHAL_SUCCESS)
@@ -65,7 +65,8 @@ static inline int xaf_update_mpu(void)
 
 static inline int xmp_set_mpu_attrs_region_uncached(void *addr, size_t size)
 {
-  int err;
+  int err = XTHAL_SUCCESS;
+#if XCHAL_HAVE_EXCLUSIVE && (XF_CFG_CORES_NUM > 1)
   err = xthal_mpu_set_region_attribute(addr, size,
                                        XTHAL_MPU_USE_EXISTING_ACCESS_RIGHTS,
                                         (XTHAL_MEM_NON_CACHEABLE    |
@@ -80,8 +81,8 @@ static inline int xmp_set_mpu_attrs_region_uncached(void *addr, size_t size)
     fprintf(stderr,"Success setting region attribute on c[%d][%08x,%08x], size %d\n",
             XF_CORE_ID, (unsigned int)addr, (unsigned int)(addr+size), size);
   }
+#endif
   return err;
 }
-
-#endif
+#endif /* XAF_HOSTED_AP */
 #endif /* __XAF_MEM_H__ */

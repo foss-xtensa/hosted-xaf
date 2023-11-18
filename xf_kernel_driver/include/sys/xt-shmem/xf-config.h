@@ -28,7 +28,7 @@
 #define XF_CFG_MAX_PORTS                16
 
 /* ...maximal number of IPC clients per proxy */
-#define XF_CFG_MAX_IPC_CLIENTS          16
+#define XF_CFG_MAX_IPC_CLIENTS          2
 
 /* ...maximal number of components handled by each IPC client */
 #define XF_CFG_MAX_COMPONENTS           512
@@ -45,8 +45,8 @@
 /* ...remote IPC buffer pool size (must be equal to the value used in firmware) */
 #define XF_CFG_REMOTE_IPC_POOL_SIZE     (256 << 10)
 
-/* ...address of shared memory data (we have single core; address is hardcoded inside FW) */
-#define XF_PROXY_DATA_ADDRESS(core)     0xe0000000
+/* ...address of shared memory data */
+#define XF_PROXY_DATA_ADDRESS(core)     XF_CFG_SHMEM_BASE_ADDRESS 
 
 #define XF_PROXY_DATA_SIZE(core)        XF_CFG_REMOTE_IPC_POOL_SIZE
 

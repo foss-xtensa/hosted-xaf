@@ -438,9 +438,10 @@ static XA_ERRORCODE xa_mixer_fill_this_buffer(XACodecBase *base, xf_message_t *m
     {
         if ((base->state & XA_BASE_FLAG_COMPLETED) && !xf_output_port_routed(&mixer->output))
         {
-
+            /* ...tena-3887-with processing with partial input, produced size 
+             * can be less than output length, so disabled the output length check */
             /* ...message must have exactly expected size (there is no ordered abortion) */
-            XF_CHK_ERR(m->length == mixer->output.length, XA_MIXER_EXEC_FATAL_STATE);
+            //XF_CHK_ERR(m->length == mixer->output.length, XA_MIXER_EXEC_FATAL_STATE);
 
             /* ...return message arrived from application immediately */
             xf_response_ok(m);
@@ -862,7 +863,7 @@ static XA_ERRORCODE xa_mixer_preprocess(XACodecBase *base)
     XATrack        *track;
     UWORD8              i;
     XA_ERRORCODE    e = XA_MIXER_EXEC_NONFATAL_NO_DATA;
-    int inport_nodata_flag = 0;
+    UWORD32         inport_nodata_flag = 0;
 
     /* ...check if output port is paused */
     if (xa_port_test_flags(&mixer->output.flags, XA_OUT_TRACK_FLAG_PAUSED))
@@ -978,19 +979,23 @@ static XA_ERRORCODE xa_mixer_preprocess(XACodecBase *base)
             }
             else
             {
-                /* ...take actual data from input port (mixer is always using internal buffer) */
-                if (!xf_input_port_fill(&track->input))
+                if (!xf_input_port_done(&track->input))
                 {
-                    /* ...failed to prefill input buffer - no sufficient data yet */
-                    inport_nodata_flag = 1;
-                    continue;
-                }
-                else
-                {
+                    xf_input_port_fill(&track->input);
+
                     /* ...retrieve number of bytes available */
                     filled = xf_input_port_level(&track->input);
+
+                    if (!filled && !xf_input_port_done(&track->input))
+                    {
+                        inport_nodata_flag = 1;
+                        continue;
+                    }
                 }
             }
+
+            /* ...set total number of bytes we have in buffer */
+            XA_API(base, XA_API_CMD_SET_INPUT_BYTES, i, &filled);
 
             /* ...check if input stream is over */
             if (xf_input_port_done(&track->input))
@@ -1001,9 +1006,6 @@ static XA_ERRORCODE xa_mixer_preprocess(XACodecBase *base)
                 TRACE(INFO, _b("mixer[%p]:track[%u] signal input-over (filled: %u)"), mixer, i, filled);
             }
 
-            /* ...set total number of bytes we have in buffer */
-            XA_API(base, XA_API_CMD_SET_INPUT_BYTES, i, &filled);
-
             /* ...actual data is to be played */
             TRACE(INPUT, _b("track-%u: filled %u bytes"), i, filled);
         }
@@ -1013,7 +1015,7 @@ static XA_ERRORCODE xa_mixer_preprocess(XACodecBase *base)
     }
 
     if (inport_nodata_flag)
-        return XA_MIXER_EXEC_NONFATAL_NO_DATA;
+        e = XA_MIXER_EXEC_NONFATAL_NO_DATA;
 
     /* ...do mixing operation only when all active tracks are setup */
     return e;
@@ -1118,8 +1120,10 @@ static XA_ERRORCODE xa_mixer_postprocess(XACodecBase *base, int done)
     /* ...output port maintenance */
     if (produced)
     {
+        /* ...tena-3887 - with partial input processing allowed, produced size 
+         * can be less than output length, so disabled the BUG check */
         /* ...make sure we have produced exactly single frame */
-        BUG(produced != mixer->output.length, _x("Invalid length: %u != %u"), produced, mixer->output.length);
+        //BUG(produced != mixer->output.length, _x("Invalid length: %u != %u"), produced, mixer->output.length);
 
         /* ...steady mixing process; advance mixer presentation timestamp */
         mixer->pts += mixer->frame_size;

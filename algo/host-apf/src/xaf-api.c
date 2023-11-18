@@ -25,7 +25,7 @@
 #include "xaf-structs.h"
 #include "xaf-version.h"
 #include "xaf-threads-priority.h"
-#if (XF_CFG_CORES_NUM > 1)
+#if (XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
 #include "xf-shared.h"
 #endif
 
@@ -128,12 +128,6 @@
 
 #define DSP_THREAD_STACK_SIZE               8192
 #define WORKER_THREAD_STACK_SIZE            8192
-
-/* Minimum component memory requirement is based on:
- * (common scratch bytes) + (internal housekeeping data-structure bytes) + (XF_CFG_MESSAGE_POOL_SIZE*(sizeof msg 64b-aligned)(256*64) bytes)
- * as referred to in ProgrammersGuide */
-#define XA_AUDIO_COMP_BUF_SIZE_MIN      (pconfig->worker_thread_scratch_size[0] + 1024 + 256*64)
-#define XA_AUDIO_COMP_BUF_SIZE_FAST_MIN 128 /* ...secondary comp mem pools which can be of lesser size */
 
 /* Minimum framework memory requirement is based on:
  * ipc-buffer 16384 bytes
@@ -600,6 +594,11 @@ int xaf_frmwk_mem_init(void)
         {
             XF_CFG_MAX_COMPS, (offset_of(xf_pool_t, buffer) + XAF_EXT_CFG_POOL_SIZE * sizeof(xf_buffer_t)), 1, /* ...get/set config ext pool */
         },
+#if defined(XAF_HOSTED_AP) && XA_ZERO_COPY
+        {
+            XF_CFG_MAX_COMPS, (offset_of(xf_pool_t, buffer) + XAF_EXT_CFG_POOL_SIZE * sizeof(xf_buffer_t)), 1, /* ...get/set config ext pool zc */
+        },
+#endif //defined(XAF_HOSTED_AP)
     };
 
     /* ...create linked lists from frmwk_local memory */
@@ -714,6 +713,11 @@ int xaf_frmwk_mem_deinit(void)
         {
             XF_CFG_MAX_COMPS, (offset_of(xf_pool_t, buffer) + XAF_EXT_CFG_POOL_SIZE * sizeof(xf_buffer_t)), 1, /* ...get/set config ext pool */
         },
+#if defined(XAF_HOSTED_AP) && XA_ZERO_COPY
+        {
+            XF_CFG_MAX_COMPS, (offset_of(xf_pool_t, buffer) + XAF_EXT_CFG_POOL_SIZE * sizeof(xf_buffer_t)), 1, /* ...get/set config ext pool zc */
+        },
+#endif //defined(XAF_HOSTED_AP)
     };
 
     /* ...release frmwk_local memory of linked lists */
@@ -747,8 +751,12 @@ XAF_ERR_CODE xaf_get_verinfo(pUWORD8 ver_info[3])
 {
     static const xa_api_info_t xa_af_info_tbl =
     {
-        "Copyright (c) 2016 by Cadence Design Systems, Inc.  ALL RIGHTS RESERVED", /* Copyright string */
+        "Copyright (c) 2015-2023 by Cadence Design Systems, Inc.  ALL RIGHTS RESERVED", /* Copyright string */
+#ifdef XAF_HOSTED_AP
+        LIBNAME " (Hosted)",            /* Library name */
+#else
         LIBNAME " (Hostless)",            /* Library name */
+#endif
         LIBVERSION,         /* Library version */
         LIB_APIVERSION      /* API version */
     };
@@ -906,16 +914,13 @@ XAF_ERR_CODE xaf_adev_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
     XAF_CHK_RANGE(XAF_MEM_ID_DEV_MAX, 0, (XAF_MEM_ID_DEV_MAX_POOLS-1));
     XAF_CHK_RANGE((XAF_MEM_ID_COMP_MAX - (XAF_MEM_ID_DEV_MAX + 1)), 0, (XAF_MEM_ID_COMP_MAX_POOLS-1));
 
-#if (XF_CFG_CORES_NUM > 1)
+    XAF_CHK_PTR(pconfig);
+#if ((XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP))
     WORD32 audio_shmem_buf_size;
     XAF_CHK_PTR(pconfig->pshmem_dsp);
     UWORD8 *pshmem_dsp = (pUWORD8) pconfig->pshmem_dsp;
-#endif
-
-    XAF_CHK_PTR(pconfig);
-    //audio_frmwk_buf_size = pconfig->audio_framework_buffer_size;
-#if (XF_CFG_CORES_NUM > 1)
     audio_shmem_buf_size = pconfig->audio_shmem_buffer_size;
+    XAF_CHK_ALIGN(audio_shmem_buf_size, XF_PROXY_ALIGNMENT);
 #endif
     proxy_thread_priority = pconfig->proxy_thread_priority;
 
@@ -927,9 +932,6 @@ XAF_ERR_CODE xaf_adev_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
 
     XAF_CHK_RANGE(core, 0, (XF_CFG_CORES_NUM-1));
 
-#if (XF_CFG_CORES_NUM > 1)
-    XAF_CHK_ALIGN(audio_shmem_buf_size, XF_PROXY_ALIGNMENT);
-#endif //(XF_CFG_CORES_NUM > 1)
     XAF_CHK_MIN(pconfig->framework_local_buffer_size, XA_FRMWK_LOCAL_BUF_SIZE_MIN);
     XAF_CHK_PTR(pconfig->pframework_local_buffer);
 
@@ -999,8 +1001,7 @@ XAF_ERR_CODE xaf_adev_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
     xf_g_ap->cb_stats = pconfig->cb_stats;
 
     // DSP shared memory allocation
-#if (XF_CFG_CORES_NUM > 1)
-
+#if ((XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP))
     size = (audio_shmem_buf_size + (XF_PROXY_ALIGNMENT-1));
     xf_g_ap->xf_dsp_shmem_buffer_size = size & (~(XF_PROXY_ALIGNMENT-1));
     xf_g_ap->dsp_thread_args[XF_DSP_THREAD_ARGS_IDX_DSP_SHMEM_BUF_SIZE] = &xf_g_ap->xf_dsp_shmem_buffer_size;
@@ -1150,7 +1151,7 @@ XAF_ERR_CODE xaf_adev_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
 }
 #endif //!XAF_HOSTED_DSP
 
-#if (XF_CFG_CORES_NUM > 1) || XAF_HOSTED_DSP
+#if ((XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)) || defined(XAF_HOSTED_DSP)
 XAF_ERR_CODE xaf_dsp_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
 {
     int ret, size, i;
@@ -1223,10 +1224,6 @@ XAF_ERR_CODE xaf_dsp_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
         XAF_CHK_ALIGN(xf_g_dsp->xf_dsp_local_buffer_size[i], XAF_64BYTE_ALIGN);//TENA_2352, TENA_2191
 
         p_adev->p_dspLocalBuff[i] = pconfig->paudio_component_buffer[i];
-        if(p_adev->p_dspLocalBuff[i])
-        {
-            memset(p_adev->p_dspLocalBuff[i], 0, xf_g_dsp->xf_dsp_local_buffer_size[i]);
-        }
     }
 
     // DSP shared memory allocation
@@ -1238,11 +1235,10 @@ XAF_ERR_CODE xaf_dsp_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
         XAF_CHK_ALIGN(pconfig->audio_shmem_buffer_size[i], XF_PROXY_ALIGNMENT);
         xf_g_dsp->xf_dsp_shmem_buffer_size[i] = pconfig->audio_shmem_buffer_size[i] & (~(XAF_64BYTE_ALIGN-1));
         XAF_CHK_ALIGN(xf_g_dsp->xf_dsp_shmem_buffer_size[i], XAF_64BYTE_ALIGN);//TENA_2352, TENA_2191
-        //XAF_CHK_MIN(xf_g_dsp->xf_dsp_shmem_buffer_size[i], ( (i == XAF_MEM_ID_DEV) ? XA_AUDIO_FRMWK_BUF_SIZE_MIN : XA_AUDIO_FRMWK_BUF_SIZE_FAST_MIN));//TENA_2352, TENA_2191
         if(pconfig->pshmem_dsp[i])
         {
             p_adev->p_dspSharedMem[i] = (UWORD8 *) (((UWORD32)pconfig->pshmem_dsp[i] + (XF_PROXY_ALIGNMENT-1)) & ~(XF_PROXY_ALIGNMENT-1)); /* ...alignment adjustment is done on the DSP side */
-            memset(p_adev->p_dspSharedMem[i], 0, xf_g_dsp->xf_dsp_shmem_buffer_size[i]);
+            TRACE(INFO, _x("c[%d] xf_dsp_shmem_buffer_size[%d]:%d p_dspSharedMem[%d]:%p"), core, i, xf_g_dsp->xf_dsp_shmem_buffer_size[i], i, p_adev->p_dspSharedMem[i]);
         }
 #else
         p_adev->p_dspSharedMem[i] = NULL;
@@ -1261,7 +1257,7 @@ XAF_ERR_CODE xaf_dsp_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
 
     xf_g_dsp->dsp_thread_args[XF_DSP_THREAD_ARGS_IDX_WORKER_SCRATCH_SIZE] = xf_g_dsp->worker_thread_scratch_size;
     {
-		UWORD32 *p_worker_scratch, j;
+        UWORD32 *p_worker_scratch, j;
 
         p_worker_scratch = (UWORD32 *)xf_g_dsp->dsp_thread_args[XF_DSP_THREAD_ARGS_IDX_WORKER_SCRATCH_SIZE];
         for(j=0; j<XAF_MAX_WORKER_THREADS; j++)
@@ -1272,7 +1268,7 @@ XAF_ERR_CODE xaf_dsp_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
 
     xf_g_dsp->dsp_thread_args[XF_DSP_THREAD_ARGS_IDX_WORKER_STACK_SIZE] = xf_g_dsp->worker_thread_stack_size;
     {
-		UWORD32 *p_worker_stack, j;
+        UWORD32 *p_worker_stack, j;
 
         p_worker_stack = (UWORD32 *)xf_g_dsp->dsp_thread_args[XF_DSP_THREAD_ARGS_IDX_WORKER_STACK_SIZE];
         for(j=0; j<XAF_MAX_WORKER_THREADS; j++)
@@ -1283,6 +1279,7 @@ XAF_ERR_CODE xaf_dsp_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
 
     p_adev->dsp_thread_priority = dsp_thread_priority;
 #if defined(HAVE_FREERTOS)
+    xf_g_dsp->dsp_thread_args[XF_DSP_THREAD_ARGS_IDX_STATS_FRMWK_AP_LOC_BUF] = &xf_g_dsp->frmwk_local_memory_curr;
     ret = __xf_thread_create(&xf_g_dsp->dsp_thread, dsp_thread_entry, (void *) xf_g_dsp->dsp_thread_args, "DSP-thread", NULL, pconfig->dsp_thread_stack_size, dsp_thread_priority);
 #else
     /* if((ret = xaf_malloc(&(xf_g_dsp->dsp_stack), pconfig->dsp_thread_stack_size, XAF_MEM_ID_DEV)))
@@ -1300,6 +1297,7 @@ XAF_ERR_CODE xaf_dsp_open(pVOID *pp_adev, xaf_adev_config_t *pconfig)
         xf_g_dsp->dsp_stack = p;
         xf_g_dsp->dsp_thread_stack_size = pconfig->dsp_thread_stack_size;
     }
+    xf_g_dsp->dsp_thread_args[XF_DSP_THREAD_ARGS_IDX_STATS_FRMWK_AP_LOC_BUF] = &xf_g_dsp->frmwk_local_memory_curr;
     ret = __xf_thread_create(&xf_g_dsp->dsp_thread, dsp_thread_entry, (void *) xf_g_dsp->dsp_thread_args, "DSP-thread", xf_g_dsp->dsp_stack, pconfig->dsp_thread_stack_size, dsp_thread_priority);
 #endif
     if (ret != 0)
@@ -1480,7 +1478,7 @@ XAF_ERR_CODE xaf_adev_close(pVOID adev_ptr, xaf_adev_close_flag flag)
 }
 #endif //!XAF_HOSTED_DSP
 
-#if (XF_CFG_CORES_NUM > 1) || XAF_HOSTED_DSP
+#if ((XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)) ||defined( XAF_HOSTED_DSP)
 XAF_ERR_CODE xaf_dsp_close(pVOID adev_ptr)
 {
     xaf_adsp_t *p_adev;
@@ -1509,7 +1507,7 @@ XAF_ERR_CODE xaf_dsp_close(pVOID adev_ptr)
             /* ... update the memory stats (including global shared memory) to the callback stats structure */
             memcpy(((xaf_perf_stats_t *)xf_g_dsp->cb_stats)->dsp_comp_buf_size_peak, xf_g_dsp->dsp_comp_buf_size_peak, sizeof(xf_g_dsp->dsp_comp_buf_size_peak));
             ((xaf_perf_stats_t *)xf_g_dsp->cb_stats)->dsp_shmem_buf_size_peak = xf_g_dsp->dsp_shmem_buf_size_peak;
-            ((xaf_perf_stats_t *)xf_g_dsp->cb_stats)->dsp_framework_local_buf_size_peak = xf_g_dsp->xaf_memory_used;
+            ((xaf_perf_stats_t *)xf_g_dsp->cb_stats)->dsp_framework_local_buf_size = xf_g_dsp->xaf_memory_used;
 
             XF_CHK_API(xf_g_dsp->cb_compute_cycles(xf_g_dsp->cb_stats));
         }
@@ -1550,6 +1548,7 @@ XAF_ERR_CODE xaf_adev_set_priorities(pVOID adev_ptr, WORD32 n_rt_priorities,
 {
     xaf_adev_t *p_adev = adev_ptr;
 
+    XAF_CHK_PTR(p_adev);
     XAF_CHK_RANGE(core, 0, (XF_CFG_CORES_NUM-1));
 
 #ifndef XAF_HOSTED_AP
@@ -1980,7 +1979,7 @@ XAF_ERR_CODE xaf_comp_set_config(pVOID comp_ptr, WORD32 num_param, pWORD32 p_par
 }
 
 /* ...This function allows setting of config parameters which needs more than 4 bytes of data. */
-XAF_ERR_CODE xaf_comp_set_config_ext(pVOID comp_ptr, WORD32 num_param, WORD32 *p_param)
+XAF_ERR_CODE xaf_comp_set_config_ext(pVOID comp_ptr, WORD32 num_param, pVOID p_param)
 {
     xaf_comp_t             *p_comp;
     xf_handle_t            *p_handle;
@@ -2042,7 +2041,7 @@ XAF_ERR_CODE xaf_comp_get_config(pVOID comp_ptr, WORD32 num_param, pWORD32 p_par
 }
 
 /* ...This function allows querying of config parameters which needs more than 4 bytes of data. */
-XAF_ERR_CODE xaf_comp_get_config_ext(pVOID comp_ptr, WORD32 num_param, WORD32 *p_param)
+XAF_ERR_CODE xaf_comp_get_config_ext(pVOID comp_ptr, WORD32 num_param, pVOID p_param)
 {
     xaf_comp_t             *p_comp;
     xf_handle_t            *p_handle;
@@ -2522,26 +2521,28 @@ XAF_ERR_CODE xaf_get_mem_stats(pVOID adev_ptr, UWORD32 core, WORD32 *pmem_info)
     }
 
 #ifdef XAF_HOSTED_AP
-    memset(pmem_info, sizeof(xaf_perf_stats_t), 0);
+    UWORD32 i;
+    memset(pmem_info, XF_CFG_CORES_NUM*sizeof(xaf_perf_stats_t), 0);
 
-    err = xf_get_dsp_stats(&p_adev->proxy, core, pmem_info);
-    /* ...update frmwk local buffer/housekeeping structure mem info */
-    ((xaf_perf_stats_t*)pmem_info)->dsp_framework_local_buf_size_peak = xf_g_ap->xaf_memory_used;
+    for (i=0; i<XF_CFG_CORES_NUM; i++)
+    {
+    	err = xf_get_dsp_stats(&p_adev->proxy, i, (pVOID)(&((xaf_perf_stats_t *)pmem_info)[i]));
+	    if (err) return XAF_API_ERR;
+    }
+
 #else //XAF_HOSTED_AP
     if(core == XF_CORE_ID_MASTER)
     {
         UWORD32 i, k;
         /* mem stats info is complete only after components are initialzed.
          * Recommended to capture stats before device is closed. */
-#if (XF_CFG_CORES_NUM > 1)
         *((WORD32 *)pmem_info + 0) = xf_g_ap->dsp_comp_buf_size_peak[XAF_MEM_ID_COMP];
+        //*((WORD32 *)pmem_info + 0) = _MAX(xf_g_ap->dsp_comp_buf_size_peak[XAF_MEM_ID_COMP], XA_AUDIO_COMP_BUF_SIZE_MIN); /* ...TODO required as there is a minimum size check in adev_open/dsp_open */
         *((WORD32 *)pmem_info + 1) = xf_g_ap->dsp_frmwk_buf_size_peak[XAF_MEM_ID_DEV];
         *((WORD32 *)pmem_info + 2) = xf_g_ap->xaf_memory_used;
+#if (XF_CFG_CORES_NUM > 1)
         *((WORD32 *)pmem_info + 3) = xf_g_ap->dsp_shmem_buf_size_peak;
 #else
-        *((WORD32 *)pmem_info + 0) = xf_g_ap->dsp_comp_buf_size_peak[XAF_MEM_ID_COMP];
-        *((WORD32 *)pmem_info + 1) = xf_g_ap->dsp_frmwk_buf_size_peak[XAF_MEM_ID_DEV];
-        *((WORD32 *)pmem_info + 2) = xf_g_ap->xaf_memory_used;
         *((WORD32 *)pmem_info + 3) = xf_g_ap->dsp_comp_buf_size_curr[XAF_MEM_ID_COMP];
         *((WORD32 *)pmem_info + 4) = xf_g_ap->dsp_frmwk_buf_size_curr[XAF_MEM_ID_DEV];
 #endif
@@ -2678,4 +2679,46 @@ XAF_ERR_CODE xaf_delete_event_channel(pVOID p_src, UWORD32 src_config_param, pVO
     return xaf_destroy_event_channel(src_comp, src_config_param, dest_comp, dst_config_param);
 }
 #endif
+
+#if XA_ZERO_COPY && defined(XAF_HOSTED_AP)
+XAF_ERR_CODE xaf_shmem_buffer_get(pVOID comp_ptr, UWORD32 size, pVOID *pshmem)
+{
+    XAF_CHK_PTR(comp_ptr);
+    XAF_CHK_PTR(pshmem);
+    UWORD32 config_buffer_size = size + (XAF_EXT_CFG_OVERHEAD * XAF_MAX_EXT_CONFIG_PARAMS);
+
+    xaf_comp_t *p_comp = (xaf_comp_t *)comp_ptr;
+    xaf_adev_t *p_adev = p_comp->p_adev;
+
+    XF_CHK_API(xf_pool_alloc(&p_adev->proxy, XAF_EXT_CFG_POOL_SIZE, config_buffer_size, XAF_MEM_ID_DEV, &p_comp->ext_cfg_pool_zc, XF_POOL_FRMWK_EXT_CFG_ZC));
+    if(p_comp->ext_cfg_pool_zc)
+    {
+        p_comp->p_config_buf_zc = xf_buffer_get(p_comp->ext_cfg_pool_zc);
+        *pshmem = xf_buffer_data(p_comp->p_config_buf_zc);
+    }
+    else
+    {
+        *pshmem = NULL;
+    }
+
+    return XAF_NO_ERR;
+}
+
+XAF_ERR_CODE xaf_shmem_buffer_put(pVOID comp_ptr, pVOID *pshmem)
+{
+    XAF_CHK_PTR(comp_ptr);
+    XAF_CHK_PTR(pshmem);
+
+    xaf_comp_t *p_comp = (xaf_comp_t *)comp_ptr;
+    xaf_adev_t *p_adev = p_comp->p_adev;
+
+    if(p_comp->ext_cfg_pool_zc)
+    {
+        xf_buffer_put(p_comp->p_config_buf_zc);
+        XF_CHK_API_LOCK(xf_pool_free(p_comp->ext_cfg_pool_zc, XF_POOL_FRMWK_EXT_CFG_ZC, XAF_MEM_ID_DEV), &xf_g_ap->g_comp_delete_lock);
+    }
+    return XAF_NO_ERR;
+}
+#endif //(XA_ZERO_COPY) && defined(XAF_HOSTED_AP)
+
 #endif //!XAF_HOSTED_DSP

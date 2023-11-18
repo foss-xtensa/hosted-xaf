@@ -402,7 +402,17 @@ ipc_store(uint32_t value, volatile uint32_t *address)
  * sync : Array of ipc_reset_sync_t structures, one per processor for
  *        initial synchronization. Note, each ipc_reset_sync_t element in
  *        the array is assumed to be max dache line size across all processors.
- *
+ *  
+ *  Following is the handshake sequence
+ *  MASTER WR pid
+ *  WORKER RD pid
+ *  WORKER WR 0
+ *  MASTER RD 0
+ *  MASTER WR pid
+ *  MASTER WR sentinel
+ *  WORKER RD sentinel
+ *  WORKER WR sentinel + 1
+ *  MASTER RD sentinel + 1
  */
 
 #define XF_IPC_SYNC_TIMEOUT_MSEC    1000
@@ -416,31 +426,25 @@ static inline int __xf_ipc_reset_sync(void)
   const uint8_t IPC_RESET_SYNC_POST = 128;
   /* Each element in the reset sync array is max dcache line size across
    * all processors. Convert to units of uint32s */
-  //uint32_t reset_sync_elem_inc = XMP_MAX_DCACHE_LINESIZE/4;
-  uint32_t reset_sync_elem_inc = sizeof(ipc_reset_sync_t);
   volatile ipc_reset_sync_t *sync = (ipc_reset_sync_t *)shared_mem_ipc_reset_sync;
   uint32_t timeout_counter;
 
-  p_sync = sync;
-  p_sync_sentinel = p_sync + reset_sync_elem_inc*XF_CORE_ID_MASTER;
+  p_sync_sentinel = &sync[XF_CORE_ID_MASTER];
 
   if (my_pid == XF_CORE_ID_MASTER)
   {
     /* ...master core */
     /* Initialize each proc's reset_sync location with their respective
      * proc ids */
-    for (pid = 0; pid < XMP_NUM_PROCS; pid++) {
+    for (pid = 0, p_sync = sync; pid < XMP_NUM_PROCS; pid++, p_sync++) {
       /* Initialize my reset_sync location to a pattern */
-      ipc_store(0, (uint32_t*)&p_sync->_);
-
       ipc_store(pid, (uint32_t *)&p_sync->_);
-      p_sync+=reset_sync_elem_inc;
     }
-    /* Wait for all the procs to set their respective reset_sync location
-     * to 0 */
-    p_sync = sync;
+#pragma flush_memory
+
+    /* Wait for all the procs to set their respective reset_sync location to 0 */
     timeout_counter = XF_IPC_SYNC_TIMEOUT_MSEC;
-    for (pid = 0; pid < XMP_NUM_PROCS; pid++) {
+    for (pid = 0, p_sync = sync; pid < XMP_NUM_PROCS; pid++, p_sync++) {
       if(pid != my_pid)
       {
         while (ipc_load((uint32_t *)&p_sync->_) != 0)
@@ -455,22 +459,20 @@ static inline int __xf_ipc_reset_sync(void)
         /* Re-initialize each proc's reset_sync location with its proc id */
         ipc_store(pid, (uint32_t*)&p_sync->_);
       }
-      p_sync+=reset_sync_elem_inc;
     }
-#pragma flush_memory
     /* All procs have reached the barrier. Write a sentinal to proc0's
      * reset_sync location to let all other procs know the same. */
     ipc_store(IPC_RESET_SYNC_POST, (uint32_t*)&p_sync_sentinel->_);
+#pragma flush_memory
 
     /* Final step: Wait for all the procs to set their respective reset_sync location
      * to 1. Worker cores write and proceed immediately.
      * Master core waits until all worker cores have written the pattern to complete the sync */
-    p_sync = sync;
     timeout_counter = XF_IPC_SYNC_TIMEOUT_MSEC;
-    for (pid = 0; pid < XMP_NUM_PROCS; pid++) {
+    for (pid = 0, p_sync = sync; pid < XMP_NUM_PROCS; pid++, p_sync++) {
       if(pid != my_pid)
       {
-        while (ipc_load((uint32_t *)&p_sync->_) != 1)
+        while (ipc_load((uint32_t *)&p_sync->_) != (1 + IPC_RESET_SYNC_POST))
         {
             if(timeout_counter--)
             {
@@ -480,13 +482,12 @@ static inline int __xf_ipc_reset_sync(void)
             return -2;
         }
       }
-      p_sync+=reset_sync_elem_inc;
     }
   }
   else
   {
     /* ...worker core */
-    p_sync += (my_pid*reset_sync_elem_inc);
+    p_sync = &sync[my_pid];
 
     /* Wait for my reset_sync location to be set to my proc id by proc 0 */
     timeout_counter = XF_IPC_SYNC_TIMEOUT_MSEC;
@@ -517,10 +518,11 @@ static inline int __xf_ipc_reset_sync(void)
         return -2;
     }
 
-    /* Final step: Re-initialize my reset_sync location to 1 from the worker cores
+    /* Final step: Re-initialize my reset_sync location to 1 + IPC_RESET_SYNC_POST from the worker cores
      * Worker cores write and proceed immediately.
      * Master core waits until all worker cores have written the pattern to complete the sync */
-    ipc_store(1, (uint32_t*)&p_sync->_);
+    ipc_store(1 + IPC_RESET_SYNC_POST, (uint32_t*)&p_sync->_);
+#pragma flush_memory
   }
   return 0;
 }

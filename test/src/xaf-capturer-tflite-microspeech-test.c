@@ -366,7 +366,7 @@ int main_task(int argc, char **argv)
 #ifndef XAF_HOSTED_AP
     adev_config.worker_thread_scratch_size[0] = dsp_comp_scratch_size;
 #endif //!XAF_HOSTED_AP
-#if (XF_CFG_CORES_NUM>1)
+#if (XF_CFG_CORES_NUM>1) && !defined(XAF_HOSTED_AP)
     adev_config.audio_shmem_buffer_size = XF_SHMEM_SIZE - audio_frmwk_buf_size*(1 + XAF_MEM_ID_DEV_MAX);
     adev_config.pshmem_dsp = shared_mem;
     FIO_PRINTF(stdout,"core[%d] shmem:%p\n", adev_config.core, shared_mem);

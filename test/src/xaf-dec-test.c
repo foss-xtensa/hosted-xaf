@@ -277,8 +277,8 @@ int main_task(int argc, char **argv)
 
     adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] =  audio_frmwk_buf_size;
     adev_config.audio_component_buffer_size[XAF_MEM_ID_COMP] = audio_comp_buf_size;
-    adev_config.core = XF_CORE_ID;
-#if (XF_CFG_CORES_NUM>1)
+    adev_config.core = XF_CORE_ID_MASTER;
+#if (XF_CFG_CORES_NUM>1) && !defined(XAF_HOSTED_AP)
     adev_config.audio_shmem_buffer_size = XF_SHMEM_SIZE - audio_frmwk_buf_size*(1 + XAF_MEM_ID_DEV_MAX);
     adev_config.pshmem_dsp = shared_mem;
 #endif //(XF_CFG_CORES_NUM>1)

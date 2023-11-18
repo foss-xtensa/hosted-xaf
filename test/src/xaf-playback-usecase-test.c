@@ -382,7 +382,7 @@ static int src_setup(void *p_comp, xaf_format_t *p_format, int nvar_args, ...)
 static int mimo12_get_config(void *p_comp)
 {
 #define PCM_SPLIT_NUM_GET_PARAMS    1
-    int param_ext[PCM_SPLIT_NUM_GET_PARAMS * 2];
+    uVOID param_ext[PCM_SPLIT_NUM_GET_PARAMS * 2];
     int ret;
 
     xaf_ext_buffer_t ext_buf[PCM_SPLIT_NUM_GET_PARAMS];
@@ -392,12 +392,12 @@ static int mimo12_get_config(void *p_comp)
 
     ext_buf[0].max_data_size = sizeof(mimo12_produced);
     ext_buf[0].valid_data_size = sizeof(mimo12_produced);
-    ext_buf[0].ext_config_flags |= XAF_EXT_PARAM_SET_FLAG(0);
+    ext_buf[0].ext_config_flags |= XAF_EXT_PARAM_SET_FLAG(XAF_EXT_PARAM_FLAG_OFFSET_ZERO_COPY);
     //ext_buf[0].ext_config_flags &= XAF_EXT_PARAM_CLEAR_FLAG(0);
     ext_buf[0].data = (UWORD8 *) mimo12_produced;
 
     param_ext[0*2+XA_EXT_CFG_ID_OFFSET] = XA_PCM_SPLIT_CONFIG_PARAM_PRODUCED;
-    param_ext[0*2+XA_EXT_CFG_BUF_PTR_OFFSET] = (int) &ext_buf[0];
+    param_ext[0*2+XA_EXT_CFG_BUF_PTR_OFFSET] = (uVOID) &ext_buf[0];
 
     ret = xaf_comp_get_config_ext(p_comp, PCM_SPLIT_NUM_GET_PARAMS, param_ext);
     if(ret < 0)
@@ -411,7 +411,7 @@ static int mimo12_get_config(void *p_comp)
 static int mixer_get_config(void *p_comp)
 {
 #define MIXER_NUM_GET_PARAMS    1
-    int param_ext[MIXER_NUM_GET_PARAMS * 2];
+    uVOID param_ext[MIXER_NUM_GET_PARAMS * 2];
     int ret;
 
     xaf_ext_buffer_t ext_buf[MIXER_NUM_GET_PARAMS];
@@ -421,12 +421,12 @@ static int mixer_get_config(void *p_comp)
 
     ext_buf[0].max_data_size = sizeof(mixer_buffer_size);
     ext_buf[0].valid_data_size = sizeof(mixer_buffer_size);
-    ext_buf[0].ext_config_flags |= XAF_EXT_PARAM_SET_FLAG(0);
+    ext_buf[0].ext_config_flags |= XAF_EXT_PARAM_SET_FLAG(XAF_EXT_PARAM_FLAG_OFFSET_ZERO_COPY);
     //ext_buf[0].ext_config_flags &= XAF_EXT_PARAM_CLEAR_FLAG(0);
     ext_buf[0].data = (UWORD8 *) &mixer_buffer_size;
 
     param_ext[0*2+XA_EXT_CFG_ID_OFFSET] = XA_MIXER_CONFIG_PARAM_BUFFER_SIZE;
-    param_ext[0*2+XA_EXT_CFG_BUF_PTR_OFFSET] = (int) &ext_buf[0];
+    param_ext[0*2+XA_EXT_CFG_BUF_PTR_OFFSET] = (uVOID) &ext_buf[0];
 
     ret = xaf_comp_get_config_ext(p_comp, MIXER_NUM_GET_PARAMS, param_ext);
     if(ret < 0)
@@ -829,6 +829,9 @@ int main_task(int argc, char **argv)
         }
         else if (NULL != strstr(argv[i + 1], "-core-cfg:"))
         {
+#if defined(XAF_HOSTED_AP) && defined(TEST_ARG_PARSE_CORE_CFG)
+            TEST_ARG_PARSE_CORE_CFG
+#else //TEST_ARG_PARSE_CORE_CFG
             char *string;
             int core_id, comp_id;
 
@@ -860,6 +863,7 @@ int main_task(int argc, char **argv)
                 }
                 g_core_comp_cfg[comp_id] = core_id;
             }
+#endif //TEST_ARG_PARSE_CORE_CFG
         }
         else if (NULL != strstr(argv[i + 1], "-probe-cfg:"))
         {
@@ -870,7 +874,7 @@ int main_task(int argc, char **argv)
             int cid;
             string = (char *)&(argv[i + 1][11]);
 
-#if (XF_CFG_CORES_NUM > 1)
+#if (XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
             cid = atoi(string);
             comp_probe[cid] = 1;
             while (1)
@@ -1069,7 +1073,7 @@ int main_task(int argc, char **argv)
     adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] =  audio_frmwk_buf_size;
     adev_config.audio_component_buffer_size[XAF_MEM_ID_COMP] =  audio_comp_buf_size;
     adev_config.core = XF_CORE_ID_MASTER;
-#if (XF_CFG_CORES_NUM>1)
+#if (XF_CFG_CORES_NUM>1) && !defined(XAF_HOSTED_AP)
     adev_config.audio_shmem_buffer_size = XF_SHMEM_SIZE - audio_frmwk_buf_size*(1 + XAF_MEM_ID_DEV_MAX);
     adev_config.pshmem_dsp = shared_mem;
 #endif //(XF_CFG_CORES_NUM>1)
@@ -1121,7 +1125,11 @@ int main_task(int argc, char **argv)
         {
             /* ...set mem-pool type of cid=2 input buffer to DEV_FAST */
             TST_CHK_API(xaf_comp_config_default_init(&comp_config), "xaf_comp_config_default_init");
+#if defined (XAF_HOSTED_AP)
+            comp_config.mem_pool_type[XAF_MEM_POOL_TYPE_COMP_APP_INPUT] = XAF_MEM_ID_DEV;
+#else
             comp_config.mem_pool_type[XAF_MEM_POOL_TYPE_COMP_APP_INPUT] = XAF_MEM_ID_DEV_FAST;
+#endif
             TST_CHK_API_COMP_CREATE_USER_CFG_CHANGE(p_adev, g_core_comp_cfg[cid], &p_comp[cid], g_comp_id[cid], comp_ninbuf[cid], comp_noutbuf[cid], &p_comp_inbuf[cid][0], comp_type[cid], "xaf_comp_create");
         }
         else
@@ -1192,7 +1200,11 @@ int main_task(int argc, char **argv)
 
     /* ...set mem-pool type of cid=2 output buffer to DEV_FAST */
     TST_CHK_API(xaf_comp_config_default_init(&comp_config), "xaf_comp_config_default_init");
+#if defined (XAF_HOSTED_AP)
+    comp_config.mem_pool_type[XAF_MEM_POOL_TYPE_COMP_APP_OUTPUT] = XAF_MEM_ID_DEV;
+#else
     comp_config.mem_pool_type[XAF_MEM_POOL_TYPE_COMP_APP_OUTPUT] = XAF_MEM_ID_DEV_FAST;
+#endif
     /* ...set mem-pool type of all internal comp  buffers to COMP_FAST */
     comp_config.mem_pool_type[XAF_MEM_POOL_TYPE_COMP_INPUT] = XAF_MEM_ID_COMP_FAST;
     comp_config.mem_pool_type[XAF_MEM_POOL_TYPE_COMP_OUTPUT] = XAF_MEM_ID_COMP_FAST;

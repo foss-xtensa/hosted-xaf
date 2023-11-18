@@ -42,7 +42,8 @@ double strm_duration;
 /* Global vaiables */
 void *p_adev = NULL;
 
-#if 0
+#ifdef PCM_GAIN_PLUGIN
+//XA_ERRORCODE xa_pcm_gain(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4){return 0;}
 /* Dummy unused functions */
 XA_ERRORCODE xa_mp3_decoder(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4){return 0;}
 XA_ERRORCODE xa_aac_decoder(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4){return 0;}
@@ -52,23 +53,16 @@ XA_ERRORCODE xa_src_pp_fx(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOI
 XA_ERRORCODE xa_renderer(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
 XA_ERRORCODE xa_capturer(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
 XA_ERRORCODE xa_amr_wb_decoder(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
-XA_ERRORCODE xa_hotword_decoder(xa_codec_handle_t p_xa_module_obj, WORD32 i_cmd, WORD32 i_idx, pVOID pv_value) { return 0; }
 XA_ERRORCODE xa_vorbis_decoder(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
-XA_ERRORCODE xa_pcm_gain(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4){return 0;}
 XA_ERRORCODE xa_dummy_aec22(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
 XA_ERRORCODE xa_dummy_aec23(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
 XA_ERRORCODE xa_pcm_split(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4){return 0;}
 XA_ERRORCODE xa_mimo_mix(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
-XA_ERRORCODE xa_dummy_wwd(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
-XA_ERRORCODE xa_dummy_hbuf(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
 XA_ERRORCODE xa_opus_encoder(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
-XA_ERRORCODE xa_dummy_wwd_msg(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
-XA_ERRORCODE xa_dummy_hbuf_msg(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4) { return 0; }
 XA_ERRORCODE xa_opus_decoder(xa_codec_handle_t p_xa_module_obj, WORD32 i_cmd, WORD32 i_idx, pVOID pv_value) {return 0;}
 XA_ERRORCODE xa_microspeech_fe(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4){return 0;}
 XA_ERRORCODE xa_microspeech_inference(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4){return 0;}
 XA_ERRORCODE xa_person_detect_inference(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4){return 0;}
-XA_ERRORCODE xa_keyword_detection_inference(xa_codec_handle_t var1, WORD32 var2, WORD32 var3, pVOID var4){return 0;}
 #endif
 
 #define AUDIO_FRMWK_BUF_SIZE_MAX    (256<<13)   /* ...this should match the framework buffer size of master core, can vary from test to test or can set to a maximum. */
@@ -80,6 +74,9 @@ int main_task(int argc, char **argv)
     pUWORD8 ver_info[3] = { 0,0,0 };    //{ver,lib_rev,api_rev}
     unsigned short board_id = 0;
     mem_obj_t* mem_handle;
+#if (XF_CFG_CORES_NUM>1) && defined(XAF_HOSTED_DSP)
+    UWORD32 i;
+#endif //(XF_CFG_CORES_NUM>1) && defined(XAF_HOSTED_DSP)
 
 #ifdef XAF_PROFILE
     xaf_perf_stats_t *pstats = (xaf_perf_stats_t *)&perf_stats;
@@ -91,6 +88,10 @@ int main_task(int argc, char **argv)
     num_bytes_read = 0;
     num_bytes_write = 0;
     aac_dec_cycles = 0; dec_cycles = 0; mix_cycles = 0; pcm_split_cycles = 0; src_cycles = 0; pcm_gain_cycles = 0;
+    wwd_cycles = hbuf_cycles = 0;
+    inference_cycles = microspeech_fe_cycles = 0;
+    pd_inference_cycles = 0;
+    kd_inference_cycles = 0;
 #endif
 
     audio_frmwk_buf_size = AUDIO_FRMWK_BUF_SIZE;
@@ -117,18 +118,30 @@ int main_task(int argc, char **argv)
     TST_CHK_API(xaf_adev_config_default_init(&adev_config), "xaf_adev_config_default_init");
 
     adev_config.core = XF_CORE_ID_MASTER;
-    adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] = audio_frmwk_buf_size;
-#if (XF_CFG_CORES_NUM>1)
-    adev_config.audio_shmem_buffer_size[0] = XF_SHMEM_SIZE - audio_frmwk_buf_size*(1 + XAF_MEM_ID_DEV_MAX);
-    adev_config.pshmem_dsp[0] = shared_mem;
-#else
-    adev_config.audio_shmem_buffer_size[0] = XF_CFG_REMOTE_IPC_POOL_SIZE;
-    adev_config.pshmem_dsp[0] = (pVOID) XF_CFG_SHMEM_ADDRESS(core);
-    //adev_config.pshmem_dsp[0] = mem_malloc(adev_config.audio_shmem_buffer_size[0], XAF_MEM_ID_DEV);
-#endif //(XF_CFG_CORES_NUM>1)
     audio_comp_buf_size = AUDIO_COMP_BUF_SIZE;
+
     adev_config.audio_component_buffer_size[XAF_MEM_ID_COMP] = audio_comp_buf_size;
     adev_config.paudio_component_buffer[XAF_MEM_ID_COMP] = mem_malloc(audio_comp_buf_size, XAF_MEM_ID_COMP);
+
+    adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] = audio_frmwk_buf_size;
+
+#ifdef XAF_HOSTED_DSP
+    adev_config.audio_shmem_buffer_size[XAF_MEM_ID_DEV] = XF_CFG_REMOTE_IPC_POOL_SIZE;
+    adev_config.pshmem_dsp[XAF_MEM_ID_DEV] = (pVOID) XF_CFG_SHMEM_ADDRESS;
+#endif
+
+#if (XF_CFG_CORES_NUM>1)
+#ifdef XAF_HOSTED_DSP
+    for (i = XAF_MEM_ID_DEV+1; i <= XAF_MEM_ID_DEV_MAX; i++)
+    {
+        adev_config.audio_shmem_buffer_size[i] = audio_frmwk_buf_size;
+        adev_config.pshmem_dsp[i] = &shared_mem[audio_frmwk_buf_size*(i + 1 + XAF_MEM_ID_DEV_MAX)];
+    }
+#else //XAF_HOSTED_DSP
+    adev_config.audio_shmem_buffer_size[XAF_MEM_ID_DEV+1] = XF_SHMEM_SIZE - audio_frmwk_buf_size*(1 + XAF_MEM_ID_DEV_MAX);
+    adev_config.pshmem_dsp[XAF_MEM_ID_DEV+1] = shared_mem;
+#endif //XAF_HOSTED_DSP
+#endif //(XF_CFG_CORES_NUM>1)
     adev_config.framework_local_buffer_size = FRMWK_APP_IF_BUF_SIZE;
     adev_config.pframework_local_buffer = mem_malloc(FRMWK_APP_IF_BUF_SIZE, XAF_MEM_ID_DEV);
 
@@ -144,12 +157,6 @@ int main_task(int argc, char **argv)
 
 #ifdef XAF_PROFILE
     memset(&pstats[XF_CORE_ID], 0, sizeof(xaf_perf_stats_t));
-
-    wwd_cycles = hbuf_cycles = 0;
-    inference_cycles = microspeech_fe_cycles = 0;
-    pd_inference_cycles = 0;
-    kd_inference_cycles = 0;
-
     adev_config.cb_compute_cycles = cb_total_frmwrk_cycles; /* ...callback function pointer to update thread cycles */
     adev_config.cb_stats = (void *)&pstats[XF_CORE_ID]; /* ...pointer to this worker DSP's stats structure, to be updated at the end of execution, in the call-back function. */
 #endif //XAF_PROFILE

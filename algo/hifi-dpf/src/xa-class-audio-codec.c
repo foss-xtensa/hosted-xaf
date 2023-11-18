@@ -945,19 +945,13 @@ static XA_ERRORCODE xa_codec_preprocess(XACodecBase *base)
         else
         {
             /* ...port is in non-bypass mode; try to fill internal buffer */
-            if (xf_input_port_done(&codec->input) || xf_input_port_fill(&codec->input))
+            if (!xf_input_port_done(&codec->input))
             {
-                /* ...retrieve number of bytes in input buffer (not really - tbd) */
-                filled = xf_input_port_level(&codec->input);
+                xf_input_port_fill(&codec->input);
             }
-            else
-            {
-                /* ...return non-fatal indication to prevent further processing, unless initialization is pending */
-                if (!(base->state & XA_BASE_FLAG_RUNTIME_INIT))
-                    return XA_CODEC_EXEC_NO_DATA;
-
-                filled = xf_input_port_level(&codec->input);
-            }
+            
+            /* ...retrieve number of bytes in input buffer (not really - tbd) */
+            filled = xf_input_port_level(&codec->input);
         }
 
         /* ...check if input stream is over */
@@ -1039,6 +1033,12 @@ static XA_ERRORCODE xa_codec_postprocess(XACodecBase *base, int done)
         /* ...consume specified number of bytes from input port */
         xf_input_port_consume(&codec->input, consumed);
 
+        /* ...clear input-setup flag */
+        base->state ^= XA_CODEC_FLAG_INPUT_SETUP;
+    }
+    /* ...tena-3887 corner case handling, if both consumed and produced is 0 but exec not done */
+    else if (produced == 0)
+    {
         /* ...clear input-setup flag */
         base->state ^= XA_CODEC_FLAG_INPUT_SETUP;
     }
@@ -1285,6 +1285,12 @@ static int xa_audio_codec_destroy(xf_component_t *component, xf_message_t *m)
 
     /* ...destroy input port */
     xf_input_port_destroy(&codec->input, core, base->component.mem_pool_type[XAF_MEM_POOL_TYPE_COMP_INPUT]);
+
+   /* ...free temporary output buffer (TENA-4112) */
+    if (codec->pinit_output)
+    {
+        xf_mem_free(codec->pinit_output, codec->init_output_size, core, 0, base->component.mem_pool_type[XAF_MEM_POOL_TYPE_COMP_OUTPUT]);
+    }
 
     /* ...destroy output port */
     xf_output_port_destroy(&codec->output, core, base->component.mem_pool_type[XAF_MEM_POOL_TYPE_COMP_OUTPUT]);

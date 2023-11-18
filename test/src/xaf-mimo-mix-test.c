@@ -405,6 +405,9 @@ int main_task(int argc, char **argv)
         }
         else if (NULL != strstr(argv[i + 1], "-core-cfg:"))
         {
+#if defined(XAF_HOSTED_AP) && defined(TEST_ARG_PARSE_CORE_CFG)
+            TEST_ARG_PARSE_CORE_CFG
+#else //TEST_ARG_PARSE_CORE_CFG
             char *string;
             int core_id, comp_id;
 
@@ -436,6 +439,7 @@ int main_task(int argc, char **argv)
                 }
                 g_core_comp_cfg[comp_id] = core_id;
             }
+#endif //TEST_ARG_PARSE_CORE_CFG
         }
         else if (NULL != strstr(argv[i + 1], "-probe-cfg:"))
         {
@@ -446,7 +450,7 @@ int main_task(int argc, char **argv)
             int cid;
             string = (char *)&(argv[i + 1][11]);
 
-#if (XF_CFG_CORES_NUM > 1)
+#if (XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
             cid = atoi(string);
             comp_probe[cid] = 1;
             while (1)
@@ -593,9 +597,9 @@ int main_task(int argc, char **argv)
 #endif
     adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] =  audio_frmwk_buf_size;
     adev_config.audio_component_buffer_size[XAF_MEM_ID_COMP] = audio_comp_buf_size;
-#if (XF_CFG_CORES_NUM>1)
+    adev_config.core = XF_CORE_ID_MASTER;
+#if (XF_CFG_CORES_NUM>1) && !defined(XAF_HOSTED_AP)
     adev_config.audio_shmem_buffer_size = XF_SHMEM_SIZE - audio_frmwk_buf_size*(1 + XAF_MEM_ID_DEV_MAX);
-    adev_config.core = XF_CORE_ID;
     adev_config.pshmem_dsp = shared_mem;
 #endif //(XF_CFG_CORES_NUM>1)
     TST_CHK_API_ADEV_OPEN(p_adev, adev_config,  "xaf_adev_open");

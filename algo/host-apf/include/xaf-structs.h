@@ -137,6 +137,12 @@ struct xaf_comp {
 #ifndef XA_DISABLE_EVENT
     UWORD32         error_channel_ctl;
 #endif
+
+#if defined(XAF_HOSTED_AP) && XA_ZERO_COPY
+    /* ... buffers on shared memory, if requested by application  */
+    xf_pool_t       *ext_cfg_pool_zc;
+    xf_buffer_t     *p_config_buf_zc;
+#endif //XAF_HOSTED_AP && XA_ZERO_COPY
 };
 
 typedef struct xaf_adev_s {

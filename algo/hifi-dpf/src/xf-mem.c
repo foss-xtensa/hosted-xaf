@@ -378,11 +378,12 @@ int xf_mm_init(xf_mm_pool_t *pool, void *addr, UWORD32 size)
 {
     UWORD32 mem_pool_type = XAF_MEM_ID_DEV; //TODO, pass as funtion argument??
 
+    TRACE(INIT, _b("addr:%p size:%d sizeof(xf_mm_block_t):%d"), addr, size, sizeof(xf_mm_block_t));
+
     /* ...check pool alignment validity */
     XF_CHK_ERR(((UWORD32)addr & (sizeof(xf_mm_block_t) - 1)) == 0, XAF_INVALIDVAL_ERR);
 
     /* ...check pool size validity */
-    TRACE(INIT, _b("size=%d "), size);
     XF_CHK_ERR(((size) & (sizeof(xf_mm_block_t) - 1)) == 0, XAF_INVALIDVAL_ERR);
 
     /* ...set pool parameters (need that stuff at all? - tbd) */
@@ -401,9 +402,9 @@ int xf_mm_init(xf_mm_pool_t *pool, void *addr, UWORD32 size)
     /* initialize the buffer size utilization counters for DSP's component and framework buffers */
     if(addr == (xf_g_dsp->xf_ap_shmem_buffer[mem_pool_type] + XA_COMP_BUF_SHMEM_STRUCT_SIZE))
     {
-        (*xf_g_dsp->pdsp_frmwk_buf_size_peak)[mem_pool_type] = (*xf_g_dsp->pdsp_frmwk_buf_size_curr)[mem_pool_type] = XA_COMP_BUF_SHMEM_STRUCT_SIZE;
+        (*xf_g_dsp->pdsp_frmwk_buf_size_peak)[mem_pool_type] += XA_COMP_BUF_SHMEM_STRUCT_SIZE;
+        (*xf_g_dsp->pdsp_frmwk_buf_size_curr)[mem_pool_type] += XA_COMP_BUF_SHMEM_STRUCT_SIZE;
     }
-
 
     return 0;
 }

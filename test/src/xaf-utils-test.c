@@ -55,11 +55,10 @@ int g_num_comps_in_graph = 0;
 xf_thread_t *g_comp_thread;
 #endif
 
-#if (XF_CFG_CORES_NUM == 1)
+#if (XF_CFG_CORES_NUM == 1) || defined(XAF_HOSTED_AP)
 void *shared_mem = NULL;
-//char perf_stats[XF_SHMEM_SIZE_PERF_STATS];
-xaf_perf_stats_t perf_stats;
-#endif
+char perf_stats[XF_SHMEM_SIZE_PERF_STATS];
+#endif //(XF_CFG_CORES_NUM == 1)
 
 /*... Global File pointer required for correct MCPS calculation */
 FILE *mcps_p_input = NULL;
@@ -252,9 +251,13 @@ int print_verinfo(pUWORD8 ver_info[],pUWORD8 app_name)
     TST_CHK_PTR(ver_info[2], "print_verinfo");
 
     FIO_PRINTF(stdout, "****************************************************************\n");
+#ifdef XAF_HOSTED_AP    
+    FIO_PRINTF(stdout, "Cadence Audio Framework (Hosted) : %s \n",app_name);
+#else
     FIO_PRINTF(stdout, "Cadence Audio Framework (Hostless) : %s \n",app_name);
+#endif
     FIO_PRINTF(stdout, "Build: %s, RTOS: %s, On: %s %s\n", BUILD_STRING, BUILD_RTOS, __DATE__, __TIME__);
-    FIO_PRINTF(stdout, "Copyright (c) 2015-2022 Cadence Design Systems, Inc.\n");
+    FIO_PRINTF(stdout, "Copyright (c) 2015-2023 Cadence Design Systems, Inc.\n");
     FIO_PRINTF(stdout, "Lib Name        : %s\n", ver_info[0]);
     FIO_PRINTF(stdout, "Lib Version     : %s\n", ver_info[1]);
     FIO_PRINTF(stdout, "API Version     : %s\n", ver_info[2]);
@@ -388,10 +391,10 @@ static int get_per_comp_size(int size, int num)
 }
 #endif
 
-#define AUDIO_COMP_BUF_SIZE         (1024 << 10)
 #define AUDIO_FRMWK_BUF_SIZE_MAX    (256<<13)
+#define AUDIO_COMP_BUF_SIZE         (1024 << 13)
 
-#if (XF_CFG_CORES_NUM > 1)
+#if (XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
 int worker_task(int argc, char **argv)
 {
     void *p_adev = NULL;
@@ -399,8 +402,9 @@ int worker_task(int argc, char **argv)
     mem_obj_t* mem_handle;
     xaf_adev_config_t adev_config;
     xaf_perf_stats_t *pstats = (xaf_perf_stats_t *)perf_stats;
-
-    audio_comp_buf_size = AUDIO_COMP_BUF_SIZE;
+#if (XF_CFG_CORES_NUM>1) && defined(XAF_HOSTED_DSP)
+    UWORD32 i;
+#endif //(XF_CFG_CORES_NUM>1) && defined(XAF_HOSTED_DSP)
 
     // NOTE: set_wbna() should be called before any other dynamic
     // adjustment of the region attributes for cache.
@@ -417,18 +421,37 @@ int worker_task(int argc, char **argv)
 #ifdef XAF_PROFILE
     dsp_comps_cycles = enc_cycles = dec_cycles = mix_cycles = pcm_gain_cycles = src_cycles = capturer_cycles = renderer_cycles = aac_dec_cycles = 0;
     aec22_cycles = aec23_cycles = pcm_split_cycles = mimo_mix_cycles = 0;
+    wwd_cycles = hbuf_cycles = 0;
+    inference_cycles = microspeech_fe_cycles = 0;
+    pd_inference_cycles = 0;
+    kd_inference_cycles = 0;
 #endif
 
     TST_CHK_API(xaf_adev_config_default_init(&adev_config), "xaf_adev_config_default_init");
 
-    adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] =  0; /* ...required to get correct shmem offset, but not used by worker DSPs */
+    adev_config.core = XF_CORE_ID;
+    audio_comp_buf_size = AUDIO_COMP_BUF_SIZE;
+    audio_frmwk_buf_size = (audio_frmwk_buf_size) ? audio_frmwk_buf_size : AUDIO_FRMWK_BUF_SIZE_MAX;
+
     adev_config.audio_component_buffer_size[XAF_MEM_ID_COMP] = audio_comp_buf_size;
     adev_config.paudio_component_buffer[XAF_MEM_ID_COMP] = mem_malloc(audio_comp_buf_size, XAF_MEM_ID_COMP);
-    adev_config.audio_shmem_buffer_size = XF_SHMEM_SIZE - AUDIO_FRMWK_BUF_SIZE_MAX*(1 + XAF_MEM_ID_DEV_MAX);
+
+    adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] = audio_frmwk_buf_size; /* ...required to get correct shmem offset, but not used by worker DSPs */
+    //adev_config.audio_framework_buffer_size[XAF_MEM_ID_DEV] = 0; /* ...not used at worker DSP */
+#ifdef XAF_HOSTED_DSP
+    adev_config.audio_shmem_buffer_size[XAF_MEM_ID_DEV] = XF_CFG_REMOTE_IPC_POOL_SIZE;
+    adev_config.pshmem_dsp[XAF_MEM_ID_DEV] = (pVOID) XF_CFG_SHMEM_ADDRESS;
+    for (i = XAF_MEM_ID_DEV+1; i <= XAF_MEM_ID_DEV_MAX; i++)
+    {
+        adev_config.audio_shmem_buffer_size[i] = audio_frmwk_buf_size;
+        adev_config.pshmem_dsp[i] = &shared_mem[audio_frmwk_buf_size*(i + 1 + XAF_MEM_ID_DEV_MAX)];
+    }
+#else //XAF_HOSTED_DSP
+    adev_config.audio_shmem_buffer_size[XAF_MEM_ID_DEV_FAST] = XF_SHMEM_SIZE - AUDIO_FRMWK_BUF_SIZE_MAX*(1 + XAF_MEM_ID_DEV_MAX);
+    adev_config.pshmem_dsp[XAF_MEM_ID_DEV_FAST] = shared_mem;
+#endif //XAF_HOSTED_DSP
     adev_config.framework_local_buffer_size = FRMWK_APP_IF_BUF_SIZE;
     adev_config.pframework_local_buffer = mem_malloc(FRMWK_APP_IF_BUF_SIZE, XAF_MEM_ID_DEV);
-    adev_config.core = XF_CORE_ID;
-    adev_config.pshmem_dsp = shared_mem;
 
     {
         int k;
@@ -480,13 +503,12 @@ int worker_task(int argc, char **argv)
 
     pstats[XF_CORE_ID].dsp_comps_cycles = dsp_comps_cycles;
 
-#if XF_LOCAL_IPC_NON_COHERENT
     XF_IPC_FLUSH(&pstats[XF_CORE_ID], (sizeof(xaf_perf_stats_t)));
-#endif
 #endif //XAF_PROFILE
 
     return 0;
 }
+#endif //(XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
 
 /* ...common function to print worker DSP MCPS */
 void print_worker_stats(void)
@@ -500,21 +522,21 @@ void print_worker_stats(void)
     {
         if(XF_CORE_ID_MASTER != i)
         {
-#if XF_LOCAL_IPC_NON_COHERENT
+#ifndef XAF_HOSTED_AP
             XF_IPC_INVALIDATE((void *)&pstats[i], (sizeof(xaf_perf_stats_t)));
-#endif
             /* ...wait till worker updates its cycle numbers */
             while (1)
             {
                 if(pstats[i].tot_cycles != 0)
                     break;
-#if XF_LOCAL_IPC_NON_COHERENT
                 XF_IPC_INVALIDATE((void *)&pstats[i], (sizeof(xaf_perf_stats_t)));
-#endif
             }
+#endif
             tot_cycles = pstats[i].tot_cycles;
             frmwk_cycles = pstats[i].frmwk_cycles;
             dsp_comps_cycles = pstats[i].dsp_comps_cycles;
+
+#ifndef XAF_HOSTED_AP
             fprintf(stderr,"Worker DSP[%d] stats\n", i);
 
             for(k = XAF_MEM_ID_COMP ; k < XAF_MEM_ID_COMP_MAX ; k++)
@@ -525,7 +547,8 @@ void print_worker_stats(void)
                 }
             }
             FIO_PRINTF(stderr,"DSP[%d] Shared Memory used by DSPs, in bytes                     : %8d\n", i, pstats[i].dsp_shmem_buf_size_peak);
-            FIO_PRINTF(stderr,"DSP[%d] Local Memory used by Framework, in bytes                 : %8d\n\n", i, pstats[i].dsp_framework_local_buf_size_peak);
+            FIO_PRINTF(stderr,"DSP[%d] Local Memory used by Framework, in bytes                 : %8d\n\n", i, pstats[i].dsp_framework_local_buf_size);
+#endif
 
             if(strm_duration)
             {
@@ -551,7 +574,6 @@ void print_worker_stats(void)
     }
 #endif //XAF_PROFILE
 }
-#endif //XF_CFG_CORES_NUM
 
 #if defined(HAVE_XOS)
 int init_rtos(int argc, char **argv, int (*main_task)(int argc, char **argv))
@@ -573,12 +595,14 @@ int init_rtos(int argc, char **argv, int (*main_task)(int argc, char **argv))
 #endif //XAF_PROFILE
 
         err = main_task(argc, argv);
-#if ((XF_CFG_CORES_NUM > 1) && (XF_CORE_ID == XF_CORE_ID_MASTER))
+#if 0
+#if ((XF_CFG_CORES_NUM > 1) && (XF_CORE_ID == XF_CORE_ID_MASTER)) && !defined(XAF_HOSTED_SP)
         if(!err) print_worker_stats();
+#endif
 #endif
 
 #if defined(XAF_HOSTED_DSP_KEEP_ALIVE) && defined(XAF_HOSTED_DSP)
-        fprintf(stderr,"%s dsp test run counter=%d c[%d] err:%x\n", __func__, cnt++, XF_CORE_ID, err);
+        fprintf(stderr,"L#%d %s dsp test run counter=%d c[%d] err:%x\n", __LINE__, __func__, cnt++, XF_CORE_ID, err);
 #endif
     }
     return err;
@@ -652,8 +676,10 @@ static void *main_task_wrapper(void *arg)
 #endif //XAF_PROFILE
 
         err = args->main_task(args->argc, args->argv);
-#if ((XF_CFG_CORES_NUM > 1) && (XF_CORE_ID == XF_CORE_ID_MASTER))
+#if 0
+#if ((XF_CFG_CORES_NUM > 1) && (XF_CORE_ID == XF_CORE_ID_MASTER)) && !defined(XAF_HOSTED_AP)
         if(!err) print_worker_stats();
+#endif
 #endif
 #if defined(XAF_HOSTED_DSP_KEEP_ALIVE) && defined(XAF_HOSTED_DSP)
         fprintf(stderr,"%s dsp test run counter=%d c[%d] err:%x\n", __func__, cnt++, XF_CORE_ID, err);
@@ -733,7 +759,7 @@ static int _comp_process_entry(void *arg)
     comp_type = *(xaf_comp_type *)(*arg_arr)[4];
     char *pcid = (char *)(*arg_arr)[5];
     int cid = *(int *)(*arg_arr)[6];
-    char get_status_cid[64];
+    char get_status_cid[256];
     sprintf(get_status_cid, "xaf_comp_get_status for %d (%s)", cid, pcid);
 #ifdef REGR_TIMEOUT_CHECK
     int timeout_cnt=0;
@@ -926,6 +952,14 @@ double compute_comp_mcps(unsigned int num_bytes, long long comp_cycles, xaf_form
 
     *strm_duration = 0.0;
 
+#if (XAF_HOSTED_AP && (XF_CORE_ID == XF_CORE_ID_MASTER))
+    xaf_perf_stats_t *pstats = (xaf_perf_stats_t *)perf_stats;
+    comp_cycles = pstats[XF_CORE_ID_MASTER].dsp_comps_cycles;
+#ifdef XAF_PROFILE
+    dsp_comps_cycles = comp_cycles;
+#endif //XAF_PROFILE
+#endif
+
     switch(comp_format.pcm_width)
     {
         case 8:
@@ -1014,13 +1048,21 @@ int print_mem_mcps_info(mem_obj_t* mem_handle, int num_comp)
 #ifdef XAF_PROFILE
     if(strm_duration)
     {
-        frmwk_cycles =  perf_stats.frmwk_cycles - (dsp_comps_cycles) - (fread_cycles + fwrite_cycles);
+        xaf_perf_stats_t *pstats = (xaf_perf_stats_t *)perf_stats;
+        frmwk_cycles =  pstats[XF_CORE_ID_MASTER].frmwk_cycles - (dsp_comps_cycles) - (fread_cycles + fwrite_cycles);
 
+#ifndef XAF_HOSTED_AP
         read_write_mcps = ((double)(fread_cycles + fwrite_cycles)/(strm_duration*1000000.0));
+#endif
+
+
+        double dsp_mcps = ((double)dsp_comps_cycles/((strm_duration)*1000000.0));
 
         FIO_PRINTF(stdout,"DSP[%d] Component MCPS                        :  %f\n", XF_CORE_ID, dsp_mcps);
 
+#ifndef XAF_HOSTED_AP
         FIO_PRINTF(stdout,"DSP[%d] File Read/Write MCPS                  :  %f\n", XF_CORE_ID, read_write_mcps);
+#endif
 
         xaf_mcps_master = ((double)frmwk_cycles/(strm_duration*1000000.0));
         FIO_PRINTF(stdout,"DSP[%d] Framework MCPS                        :  %f\n\n", XF_CORE_ID, xaf_mcps_master);
@@ -1030,6 +1072,10 @@ int print_mem_mcps_info(mem_obj_t* mem_handle, int num_comp)
         FIO_PRINTF(stdout,"Total MCPS (DSP + XAF)                       :  %f\n\n",(xaf_mcps_master + dsp_mcps));
 #endif
     }
+#if (XAF_HOSTED_AP && (XF_CFG_CORES_NUM > 1))
+    print_worker_stats();
+#endif
+
 #endif
 
     return 0;
@@ -1041,35 +1087,51 @@ WORD32 dsp_stats(void *p_adev, xaf_adev_config_t *padev_config)
     WORD32 err=0;
 #ifdef XAF_PROFILE
     /* collect memory stats before closing the device */
-    WORD32 i, k;
+    WORD32 i, j, k;
     dsp_comps_cycles = 0; /* ...reset global cycles sum */
 #ifdef XAF_HOSTED_AP
-    if((err = xaf_get_mem_stats(p_adev, padev_config->core, (WORD32 *)&perf_stats)))
+    xaf_perf_stats_t *pstats = (xaf_perf_stats_t *)perf_stats;
+    if((err = xaf_get_mem_stats(p_adev, padev_config->core, (WORD32 *)pstats)))
     {
         FIO_PRINTF(stdout,"Init is incomplete, reliable stats are unavailable.\n");
     }
     else
     {
-        FIO_PRINTF(stderr,"Local Memory used by DSP Components, in bytes            : %8d of %8d\n", perf_stats.dsp_comp_buf_size_peak[XAF_MEM_ID_COMP], padev_config->audio_component_buffer_size[XAF_MEM_ID_COMP]);
-        FIO_PRINTF(stderr,"Shared Memory used by Components and Framework, in bytes : %8d of %8d\n", perf_stats.dsp_frmwk_buf_size_peak[XAF_MEM_ID_DEV], padev_config->audio_framework_buffer_size[XAF_MEM_ID_DEV]);
-        FIO_PRINTF(stderr,"Local Memory used by Framework, in bytes                 : %8d\n", perf_stats.dsp_framework_local_buf_size_peak);
-
-        for(i = k = XAF_MEM_ID_COMP+1; k<XAF_MEM_ID_COMP_MAX ; k++, i++)
+	    FIO_PRINTF(stderr,"\n\n");
+	    for (j=0; j<XF_CFG_CORES_NUM; j++)
         {
-            if(perf_stats.dsp_comp_buf_size_peak[i])
+			FIO_PRINTF(stderr,"DSP[%d] Local Memory used by Components, in bytes                : %8d of %8d\n", j, pstats[j].dsp_comp_buf_size_peak[XAF_MEM_ID_COMP], padev_config->audio_component_buffer_size[XAF_MEM_ID_COMP]);
+			if(pstats[j].dsp_frmwk_buf_size_peak[XAF_MEM_ID_DEV])
+			{
+			    FIO_PRINTF(stderr,"DSP[%d] Shared Memory used by Components and Framework, in bytes : %8d of %8d\n", j, pstats[j].dsp_frmwk_buf_size_peak[XAF_MEM_ID_DEV], padev_config->audio_framework_buffer_size[XAF_MEM_ID_DEV]);
+			}
+			FIO_PRINTF(stderr,"DSP[%d] Local Memory used by Framework, in bytes                 : %8d\n", j, pstats[j].dsp_framework_local_buf_size);
+            
+			for(i = k = XAF_MEM_ID_COMP+1; k<= XAF_MEM_ID_COMP_MAX ; k++, i++)
+			{
+			    if(pstats[j].dsp_comp_buf_size_peak[i])
+			    {
+				    FIO_PRINTF(stderr,"DSP[%d] Local Memory type[%d] used by DSP Components, in bytes    : %8d of %8d\n", j, k, pstats[j].dsp_comp_buf_size_peak[i], padev_config->audio_component_buffer_size[k]);
+			    }
+			}
+#if (XF_CFG_CORES_NUM > 1)
+            for(i = k = XAF_MEM_ID_DEV+1; k<= XAF_MEM_ID_DEV_MAX ; k++, i++)
             {
-                FIO_PRINTF(stderr,"Local Memory type[%d] used by DSP Components, in bytes    : %8d of %8d\n", k, perf_stats.dsp_comp_buf_size_peak[i], padev_config->audio_component_buffer_size[k]);
+                if(pstats[j].dsp_frmwk_buf_size_peak[i])
+                {
+                    FIO_PRINTF(stderr,"DSP [%d] Shared Memory type[%d] used by Components and framework, in bytes    : %8d of %8d\n", j, k, pstats[j].dsp_frmwk_buf_size_peak[i], padev_config->audio_framework_buffer_size[k]);
+                }
             }
-        }
-        for(i = k = XAF_MEM_ID_DEV+1; k<XAF_MEM_ID_DEV_MAX ; k++, i++)
-        {
-            if(perf_stats.dsp_comp_buf_size_peak[i])
+            for(k = XAF_MEM_ID_DEV+1; k == XAF_MEM_ID_DEV_FAST ; k++)
             {
-                FIO_PRINTF(stderr,"Local Memory type[%d] used by DSP Components, in bytes    : %8d of %8d\n", k, perf_stats.dsp_comp_buf_size_peak[i], padev_config->audio_component_buffer_size[k]);
-            }
-        }
-        /* ...update component cycles for MCPS calculation if called next */
-        dsp_comps_cycles = perf_stats.dsp_comps_cycles;
+                if(pstats[j].dsp_shmem_buf_size_peak)
+                {
+                    FIO_PRINTF(stderr,"DSP[%d] Shared Memory type[%d] used by DSPs, in bytes             : %8d\n", j, k, pstats[j].dsp_shmem_buf_size_peak);
+                }
+            } //for(;k;)
+#endif //(XF_CFG_CORES_NUM > 1)
+            FIO_PRINTF(stderr,"\n");
+        }//for(;j;)
     }
 #else //XAF_HOSTED_AP
     {
@@ -1161,7 +1223,7 @@ int parse_runtime_params(void **runtime_params, int argc, char **argv, int num_c
                 pr_string = (char *)&(argv[i + 1][4]);
 
             x = 0;
-#if (XF_CFG_CORES_NUM > 1)
+#if (XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
             char pr_char, pr_char_next;
             int cid;
             cid = atoi(pr_string);
@@ -1273,7 +1335,7 @@ int parse_runtime_params(void **runtime_params, int argc, char **argv, int num_c
             pr_string = (char *)&(argv[i + 1][3]);
 
             x = 0;
-#if (XF_CFG_CORES_NUM > 1)
+#if (XF_CFG_CORES_NUM > 1) && !defined(XAF_HOSTED_AP)
             int cid;
             cid = atoi(pr_string);
             cmd_params[x++] = cid;
@@ -1662,26 +1724,15 @@ int execute_runtime_actions(void *command_array,
                 }
             }
 
-            if (cmd->comp_create_delete_flag == 0)
-            {
-                fprintf(stderr, "DISCONNECT2 cid:%d port:%d start\n", cmd->component_id, cmd->port);
-                if (gpcomp_disconnect(cmd->component_id, cmd->port, cmd->component_dest_id, cmd->port_dest, cmd->comp_create_delete_flag))
-                {
-                    fprintf(stderr, "ERROR: DISCONNECT2 cid:%d port:%d\n", cmd->component_id, cmd->port);
-                }
-            }
-            else
-            {
-                /* ...create a thread whenever disconnect and delete is required */
-                g_disc_thread_args[0] = cmd->component_id;
-                g_disc_thread_args[1] = cmd->port;
-                g_disc_thread_args[2] = cmd->component_dest_id;
-                g_disc_thread_args[3] = cmd->port_dest;
-                g_disc_thread_args[4] = cmd->comp_create_delete_flag;
+            /* ...create a thread whenever disconnect and delete is required */
+            g_disc_thread_args[0] = cmd->component_id;
+            g_disc_thread_args[1] = cmd->port;
+            g_disc_thread_args[2] = cmd->component_dest_id;
+            g_disc_thread_args[3] = cmd->port_dest;
+            g_disc_thread_args[4] = cmd->comp_create_delete_flag;
 
-                __xf_thread_create(&g_disconnect_thread, comp_disconnect_entry, g_disc_thread_args, "disconnect thread", disc_thread_stack, STACK_SIZE, XAF_APP_THREADS_PRIORITY);
-                active_disconnect_thread = 1;
-            }
+            __xf_thread_create(&g_disconnect_thread, comp_disconnect_entry, g_disc_thread_args, "disconnect thread", disc_thread_stack, STACK_SIZE, XAF_APP_THREADS_PRIORITY);
+            active_disconnect_thread = 1;
 
             break;
 

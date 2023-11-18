@@ -38,8 +38,10 @@
 #define XF_LOCAL_IPC_NON_COHERENT       0
 #endif
 
+#ifndef XF_REMOTE_IPC_NON_COHERENT
 /* ...remote IPC is coherent for hostless xaf (say) */
 #define XF_REMOTE_IPC_NON_COHERENT      0
+#endif
 
 /* ...size of the local memory pool (in bytes) */
 #define XF_CFG_LOCAL_POOL_SIZE          (1024 << 10)

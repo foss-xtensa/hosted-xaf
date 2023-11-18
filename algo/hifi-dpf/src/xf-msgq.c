@@ -80,7 +80,7 @@ static inline void xf_msg_proxy_put(xf_message_t *m)
     /* ...assert IPI interrupt on target ("destination") core if needed */
     UWORD32  src = XF_MSG_SRC_CORE(m->id);
     if (dst != src) {
-        xf_ipi_assert(dst);
+        xf_ipi_assert(src, dst);
     } else
 #endif
     {
@@ -139,10 +139,10 @@ static UWORD32 xf_shmem_process_input(UWORD32 core)
     read_idx = XF_PROXY_READ(core, cmd_read_idx);
     write_idx = XF_PROXY_READ(core, cmd_write_idx);
 
-    TRACE(EXEC, _b("Command queue: write = %08X / read = %08X"), write_idx, read_idx);
-    TRACE(EXEC, _b("remote->cmd_write_idx= %p /local->cmd_read_idx= %p"), \
+    /* TRACE(EXEC, _b("Command queue: write = %08X / read = %08X"), write_idx, read_idx);
+    TRACE(EXEC, _b("&remote->cmd_write_idx= %p /&local->cmd_read_idx= %p"), \
     &((xf_shmem_data_t *)XF_CORE_DATA(core)->shmem)->remote.cmd_write_idx, \
-    &((xf_shmem_data_t *)XF_CORE_DATA(core)->shmem)->local.cmd_read_idx); 
+    &((xf_shmem_data_t *)XF_CORE_DATA(core)->shmem)->local.cmd_read_idx); */
 
     /* ...process all committed commands */
     while (!XF_QUEUE_EMPTY(read_idx, write_idx))
@@ -249,10 +249,10 @@ static UWORD32 xf_shmem_process_output(UWORD32 core)
     write_idx = XF_PROXY_READ(core, rsp_write_idx);
     read_idx = XF_PROXY_READ(core, rsp_read_idx);
 
-    TRACE(EXEC, _b("Response queue: write = %08X / read = %08X"), write_idx, read_idx);
+    /* TRACE(EXEC, _b("Response queue: write = %08X / read = %08X"), write_idx, read_idx);
     TRACE(EXEC, _b("remote->rsp_read_idx= %p /local->rsp_write_idx= %p"), \
     &((xf_shmem_data_t *)XF_CORE_DATA(core)->shmem)->remote.rsp_read_idx, \
-    &((xf_shmem_data_t *)XF_CORE_DATA(core)->shmem)->local.rsp_write_idx);
+    &((xf_shmem_data_t *)XF_CORE_DATA(core)->shmem)->local.rsp_write_idx);*/
 
     /* ...while we have response messages and there's space to write out one */
     while (!XF_QUEUE_FULL(read_idx, write_idx))
@@ -367,7 +367,7 @@ void xf_shmem_process_queues(UWORD32 core)
         /* ...assert remote mailbox interrupt if global update bit is set */
         if (status & XF_PROXY_STATUS_REMOTE)
         {
-            xf_ipi_assert(core);
+            xf_ipi_assert(core, core);
         }
     }
     while (status);
@@ -401,7 +401,7 @@ int xf_shmem_init(UWORD32 core)
     /* ...system-specific initialization of IPC layer */
     XF_CHK_API(xf_ipc_init(core));
 
-    for(i = XAF_MEM_ID_DEV+1 ; i <= XAF_MEM_ID_DEV_MAX; i++)
+    for(i = XAF_MEM_ID_DEV+2 ; i <= XAF_MEM_ID_DEV_MAX; i++)
     {
         XF_CHK_API(xf_mm_init(&(XF_CORE_DATA(core)->shared_pool[i]), xf_g_dsp->xf_ap_shmem_buffer[i], xf_g_dsp->xf_ap_shmem_buffer_size[i]));
         TRACE(INFO, _b("DSP frmwk memory pool type:%d size:%d [%p] initialized"), i, xf_g_dsp->xf_ap_shmem_buffer_size[i], xf_g_dsp->xf_ap_shmem_buffer[i]);
@@ -425,7 +425,7 @@ int xf_shmem_deinit(UWORD32 core)
     XF_CHK_API(xf_ipc_deinit(core));
 
     /* ...deinitialize per-core memory loop */
-    for(i = XAF_MEM_ID_DEV+1; i <= XAF_MEM_ID_DEV_MAX; i++)
+    for(i = XAF_MEM_ID_DEV+2; i <= XAF_MEM_ID_DEV_MAX; i++)
     {
         XF_CHK_API(xf_mm_deinit(&(XF_CORE_DATA(core)->shared_pool[i])));
     }//for(;i;)
